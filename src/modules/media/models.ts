@@ -4,6 +4,8 @@ export type MediaAssetDoc = {
   /** Stable public identity. Object keys and signed URLs are never used as identity. */
   assetId: string;
   storageKey: string | null;
+  /** Absolute CDN URL when stored on ImageKit; null for local-only objects. */
+  publicUrl: string | null;
   /** Where the original bytes wait until validation completes. */
   stagingKey: string | null;
   collectionKey: string;

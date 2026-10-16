@@ -1,35 +1,32 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { AppConfig } from '../../config/index.ts';
 import { AppError } from '../../shared/errors.ts';
+import { assertSafeKey } from './storage-keys.ts';
+import { createImageKitStorage } from './storage-imagekit.ts';
+
+export { assertSafeKey, imageKitStorageKey, parseImageKitStorageKey, IMAGEKIT_STORAGE_KEY_PREFIX } from './storage-keys.ts';
 
 /**
  * Storage boundary for uploaded media.
  *
- * Object storage is not approved yet (see OPEN_QUESTIONS), so the only implementation is a
- * local filesystem adapter used by development and tests. It refuses to operate in
- * production unless `MEDIA_ALLOW_LOCAL_FILESYSTEM=true` is set explicitly, so a development
- * adapter can never silently become the production store. Adding a provider later means
- * writing one more implementation of this type — nothing else changes.
+ * Implementations: local filesystem (development/test) and ImageKit (`MEDIA_DRIVER=imagekit`).
+ * The local adapter refuses to operate in production unless `MEDIA_ALLOW_LOCAL_FILESYSTEM=true`.
  */
+export type MediaPutResult = {
+  /** Persisted object key (logical path for local; `ik:<fileId>` for ImageKit). */
+  key: string;
+  /** Absolute CDN URL when the provider exposes one (ImageKit). */
+  publicUrl?: string;
+};
+
 export type MediaStorage = {
   readonly driver: string;
-  put: (key: string, bytes: Buffer) => Promise<void>;
+  put: (key: string, bytes: Buffer) => Promise<MediaPutResult>;
   get: (key: string) => Promise<Buffer>;
   delete: (key: string) => Promise<void>;
   exists: (key: string) => Promise<boolean>;
 };
-
-// Keys are server-generated (base64url ids and hex digests), so mixed case is fine. What
-// matters is that a key can never traverse out of the root or introduce a hidden path.
-const SAFE_KEY = /^[A-Za-z0-9][A-Za-z0-9/._-]{0,200}$/;
-
-/** Keys are generated server-side; this is the second line of defence against traversal. */
-export function assertSafeKey(key: string): string {
-  if (!SAFE_KEY.test(key) || key.includes('..') || key.includes('//')) {
-    throw new AppError('INTERNAL', 'Unsafe storage key', { details: { key } });
-  }
-  return key;
-}
 
 export function createLocalStorage(options: { root: string; nodeEnv: string; allowInProduction: boolean }): MediaStorage {
   const root = path.resolve(options.root);
@@ -59,6 +56,7 @@ export function createLocalStorage(options: { root: string; nodeEnv: string; all
       const full = resolve(key);
       await mkdir(path.dirname(full), { recursive: true });
       await writeFile(full, bytes);
+      return { key };
     },
     async get(key) {
       guard();
@@ -84,11 +82,15 @@ export function createLocalStorage(options: { root: string; nodeEnv: string; all
   };
 }
 
-export function createMediaStorage(config: {
-  mediaStorageRoot: string;
-  nodeEnv: string;
-  mediaAllowLocalFilesystem: boolean;
-}): MediaStorage {
+export function createMediaStorage(config: AppConfig): MediaStorage {
+  if (config.mediaDriver === 'imagekit') {
+    return createImageKitStorage({
+      urlEndpoint: config.imagekitUrlEndpoint,
+      publicKey: config.imagekitPublicKey,
+      privateKey: config.imagekitPrivateKey,
+      folder: config.imagekitFolder,
+    });
+  }
   return createLocalStorage({
     root: config.mediaStorageRoot,
     nodeEnv: config.nodeEnv,

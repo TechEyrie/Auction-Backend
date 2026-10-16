@@ -270,7 +270,7 @@ test('D10 a storage failure is recorded as failed with a working retry', async (
   const failing: MediaStorage = {
     driver: 'failing-promotion',
     put: async (key, bytes) => {
-      if (key.startsWith('staging/')) return storage.put(key, bytes);
+      if (key.startsWith('staging/')) return await storage.put(key, bytes);
       throw new Error('disk on fire');
     },
     get: (key) => storage.get(key),

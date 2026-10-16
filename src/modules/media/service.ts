@@ -84,6 +84,7 @@ export function createMediaService(deps: MediaDeps) {
     await record({
       assetId,
       storageKey: null,
+      publicUrl: null,
       stagingKey: null,
       collectionKey: input.collectionKey,
       position: await nextPosition(input.collectionKey),
@@ -179,8 +180,10 @@ export function createMediaService(deps: MediaDeps) {
 
       const assetId = `m_${randomToken(9)}`;
       const stagingKey = `staging/${assetId}`;
+      let stagedObjectKey = stagingKey;
       try {
-        await storage.put(stagingKey, bytes);
+        const staged = await storage.put(stagingKey, bytes);
+        stagedObjectKey = staged.key;
       } catch (err) {
         // Any storage failure is an outage, not a client error: record it and report a
         // retryable 503. The underlying error stays in the logs, never in the response.
@@ -197,7 +200,7 @@ export function createMediaService(deps: MediaDeps) {
 
       const info = inspectImage(bytes);
       if (!info) {
-        await storage.delete(stagingKey).catch(() => {});
+        await storage.delete(stagedObjectKey).catch(() => {});
         throw await reject({
           declaredMime,
           bytes: bytes.length,
@@ -207,7 +210,7 @@ export function createMediaService(deps: MediaDeps) {
         });
       }
       if (info.mime !== declaredMime) {
-        await storage.delete(stagingKey).catch(() => {});
+        await storage.delete(stagedObjectKey).catch(() => {});
         throw await reject({
           declaredMime,
           bytes: bytes.length,
@@ -221,7 +224,7 @@ export function createMediaService(deps: MediaDeps) {
       // than stored, so a half-uploaded file can never become a listing image.
       const integrity = verifyImageIntegrity(bytes, info.mime);
       if (integrity) {
-        await storage.delete(stagingKey).catch(() => {});
+        await storage.delete(stagedObjectKey).catch(() => {});
         throw await reject({
           declaredMime,
           bytes: bytes.length,
@@ -231,7 +234,7 @@ export function createMediaService(deps: MediaDeps) {
         });
       }
       if (info.width > config.mediaMaxDimension || info.height > config.mediaMaxDimension) {
-        await storage.delete(stagingKey).catch(() => {});
+        await storage.delete(stagedObjectKey).catch(() => {});
         throw await reject({
           declaredMime,
           bytes: bytes.length,
@@ -248,13 +251,17 @@ export function createMediaService(deps: MediaDeps) {
       // The checksum names the content, the asset id makes the key unique: two listings may
       // legitimately upload the same photo, and a shared object key would let deleting one
       // asset's bytes break the other. The `rq_media_checksum` index still finds duplicates.
-      const storageKey = storageKeyFor(checksum, assetId, info.mime, now);
+      const logicalStorageKey = storageKeyFor(checksum, assetId, info.mime, now);
 
       const position = await nextPosition(collectionKey);
       const isCover = position === 0;
       let promoted = false;
+      let persistedStorageKey: string | null = null;
+      let publicUrl: string | null = null;
       try {
-        await storage.put(storageKey, stripped);
+        const finalPut = await storage.put(logicalStorageKey, stripped);
+        persistedStorageKey = finalPut.key;
+        publicUrl = finalPut.publicUrl ?? null;
         promoted = true;
       } catch (err) {
         logger.error('media promotion failed', { assetId, err });
@@ -262,9 +269,10 @@ export function createMediaService(deps: MediaDeps) {
 
       const doc = await record({
         assetId,
-        storageKey: promoted ? storageKey : null,
+        storageKey: promoted ? persistedStorageKey : null,
+        publicUrl: promoted ? publicUrl : null,
         // The staging copy is kept only when the promotion failed, so a retry is possible.
-        stagingKey: promoted ? null : stagingKey,
+        stagingKey: promoted ? null : stagedObjectKey,
         collectionKey,
         position,
         isCover,
@@ -281,7 +289,7 @@ export function createMediaService(deps: MediaDeps) {
         deletedAt: null,
       });
 
-      if (promoted) await storage.delete(stagingKey).catch(() => {});
+      if (promoted) await storage.delete(stagedObjectKey).catch(() => {});
 
       await recordAudit(db, {
         actorId: input.actor.reference,
@@ -315,11 +323,20 @@ export function createMediaService(deps: MediaDeps) {
       const stripped = stripImageMetadata(bytes, info.mime);
       const checksum = asset.checksum ?? createHash('sha256').update(bytes).digest('hex');
       const now = new Date();
-      const storageKey = storageKeyFor(checksum, assetId, info.mime, now);
-      await storage.put(storageKey, stripped);
+      const logicalStorageKey = storageKeyFor(checksum, assetId, info.mime, now);
+      const finalPut = await storage.put(logicalStorageKey, stripped);
       const updated = await assets().findOneAndUpdate(
         { assetId, status: 'failed' },
-        { $set: { status: 'ready', storageKey, stagingKey: null, statusReason: null, updatedAt: new Date() } },
+        {
+          $set: {
+            status: 'ready',
+            storageKey: finalPut.key,
+            publicUrl: finalPut.publicUrl ?? null,
+            stagingKey: null,
+            statusReason: null,
+            updatedAt: new Date(),
+          },
+        },
         { returnDocument: 'after' },
       );
       if (!updated) throw conflict('This upload changed while retrying');
@@ -438,7 +455,7 @@ export function createMediaService(deps: MediaDeps) {
       if (asset.stagingKey) await storage.delete(asset.stagingKey).catch(() => {});
       await assets().updateOne(
         { assetId },
-        { $set: { status: 'deleted', deletedAt: new Date(), updatedAt: new Date(), storageKey: null, stagingKey: null } },
+        { $set: { status: 'deleted', deletedAt: new Date(), updatedAt: new Date(), storageKey: null, publicUrl: null, stagingKey: null } },
       );
       await recordAudit(db, {
         actorId: actor.reference,
@@ -473,7 +490,7 @@ export function createMediaService(deps: MediaDeps) {
         if (asset.stagingKey) await storage.delete(asset.stagingKey).catch(() => {});
         await assets().updateOne(
           { assetId },
-          { $set: { status: 'deleted', deletedAt: new Date(), updatedAt: new Date(), storageKey: null, stagingKey: null } },
+          { $set: { status: 'deleted', deletedAt: new Date(), updatedAt: new Date(), storageKey: null, publicUrl: null, stagingKey: null } },
         );
       }
       if (candidates.length > 0) {

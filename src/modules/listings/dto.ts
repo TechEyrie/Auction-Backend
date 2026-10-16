@@ -157,7 +157,7 @@ export function toPublicListingDto(
       width: entry.width,
       height: entry.height,
       alt: entry.alt,
-      url: `/api/listings/${listing.listingReference}/media/${entry.assetId}/file`,
+      url: context.media.get(entry.assetId)?.url ?? `/api/listings/${listing.listingReference}/media/${entry.assetId}/file`,
     })),
     coverAssetId: listing.coverAssetId,
     seller: context.seller,

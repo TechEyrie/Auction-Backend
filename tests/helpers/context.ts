@@ -20,6 +20,7 @@ export function testEnv(overrides: Record<string, string> = {}): Record<string, 
     CORS_ORIGINS: 'http://localhost:3000',
     MFA_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
     ADMIN_BOOTSTRAP_TOKEN: 'test-bootstrap-token',
+    MEDIA_DRIVER: 'local',
     ...overrides,
   };
 }
@@ -29,7 +30,10 @@ export function stubMediaStorage(): import('../../src/modules/media/storage.ts')
   const files = new Map<string, Buffer>();
   return {
     driver: 'memory',
-    put: async (key, bytes) => void files.set(key, bytes),
+    put: async (key, bytes) => {
+      files.set(key, bytes);
+      return { key };
+    },
     get: async (key) => {
       const value = files.get(key);
       if (!value) throw new Error(`missing key ${key}`);

@@ -455,7 +455,10 @@ export function createListingService(deps: ListingDeps) {
     };
   }
 
-  async function mediaContext(entries: ListingMediaEntry[]): Promise<Map<string, { status: string; width: number | null; height: number | null; url: string | null }>> {
+  async function mediaContext(
+    entries: ListingMediaEntry[],
+    options?: { publicListingReference?: string },
+  ): Promise<Map<string, { status: string; width: number | null; height: number | null; url: string | null }>> {
     const map = new Map<string, { status: string; width: number | null; height: number | null; url: string | null }>();
     for (const entry of entries) {
       let asset;
@@ -465,11 +468,14 @@ export function createListingService(deps: ListingDeps) {
         map.set(entry.assetId, { status: 'missing', width: null, height: null, url: null });
         continue;
       }
+      const proxyUrl = options?.publicListingReference
+        ? `/api/listings/${options.publicListingReference}/media/${entry.assetId}/file`
+        : `/api/admin/media/${asset.assetId}/file`;
       map.set(entry.assetId, {
         status: asset.status,
         width: asset.image?.width ?? null,
         height: asset.image?.height ?? null,
-        url: asset.status === 'ready' ? `/api/admin/media/${asset.assetId}/file` : null,
+        url: asset.status === 'ready' ? (asset.publicUrl ?? proxyUrl) : null,
       });
     }
     return map;
@@ -636,7 +642,7 @@ export function createListingService(deps: ListingDeps) {
       return {
         seller: await sellerContext(listing.sellerReference),
         attributeFields: fields,
-        media: await mediaContext(listing.media),
+        media: await mediaContext(listing.media, { publicListingReference: listing.listingReference }),
         ...live,
       };
     },

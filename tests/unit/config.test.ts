@@ -88,6 +88,22 @@ test('production with https CORS auto-selects SameSite=None and Partitioned', ()
   assert.equal(config.cookiePartitioned, true);
 });
 
+test('MEDIA_DRIVER=imagekit requires ImageKit credentials', () => {
+  assert.throws(
+    () =>
+      loadConfig({
+        NODE_ENV: 'development',
+        MONGODB_URI: 'mongodb://localhost:27017',
+        MEDIA_DRIVER: 'imagekit',
+      }),
+    (err: unknown) =>
+      err instanceof ConfigurationError &&
+      err.issues.some((issue) => issue.includes('IMAGEKIT_URL_ENDPOINT')) &&
+      err.issues.some((issue) => issue.includes('IMAGEKIT_PUBLIC_KEY')) &&
+      err.issues.some((issue) => issue.includes('IMAGEKIT_PRIVATE_KEY')),
+  );
+});
+
 test('COOKIE_SAME_SITE=none without Secure is rejected', () => {
   assert.throws(
     () =>

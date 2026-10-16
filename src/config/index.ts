@@ -41,8 +41,13 @@ export type AppConfig = {
   mediaMaxBytes: number;
   mediaMaxFilesPerCollection: number;
   mediaMaxDimension: number;
+  mediaDriver: 'local' | 'imagekit';
   mediaStorageRoot: string;
   mediaAllowLocalFilesystem: boolean;
+  imagekitUrlEndpoint: string;
+  imagekitPublicKey: string;
+  imagekitPrivateKey: string;
+  imagekitFolder: string;
   paymentProvider: string | null;
   paymentWebhookSecret: string | null;
 };
@@ -94,9 +99,14 @@ const schema = z.object({
   MEDIA_MAX_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
   MEDIA_MAX_FILES_PER_COLLECTION: z.coerce.number().int().positive().max(50).default(10),
   MEDIA_MAX_DIMENSION: z.coerce.number().int().positive().default(6000),
+  MEDIA_DRIVER: z.enum(['local', 'imagekit']).default('local'),
   MEDIA_STORAGE_ROOT: z.string().min(1).default('var/media'),
   /** Explicit opt-in; without it the filesystem adapter refuses to run in production. */
   MEDIA_ALLOW_LOCAL_FILESYSTEM: z.enum(['true', 'false']).optional(),
+  IMAGEKIT_URL_ENDPOINT: z.string().optional(),
+  IMAGEKIT_PUBLIC_KEY: z.string().optional(),
+  IMAGEKIT_PRIVATE_KEY: z.string().optional(),
+  IMAGEKIT_FOLDER: z.string().optional(),
 });
 
 function parseTrustProxy(raw: string): boolean | number {
@@ -190,6 +200,19 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     issues.push('COOKIE_PARTITIONED=true requires COOKIE_SECURE=true');
   }
 
+  const mediaDriver = data?.MEDIA_DRIVER ?? 'local';
+  if (mediaDriver === 'imagekit') {
+    if (!(data?.IMAGEKIT_URL_ENDPOINT ?? '').trim()) {
+      issues.push('IMAGEKIT_URL_ENDPOINT: required when MEDIA_DRIVER=imagekit');
+    }
+    if (!(data?.IMAGEKIT_PUBLIC_KEY ?? '').trim()) {
+      issues.push('IMAGEKIT_PUBLIC_KEY: required when MEDIA_DRIVER=imagekit');
+    }
+    if (!(data?.IMAGEKIT_PRIVATE_KEY ?? '').trim()) {
+      issues.push('IMAGEKIT_PRIVATE_KEY: required when MEDIA_DRIVER=imagekit');
+    }
+  }
+
   if (!data || issues.length > 0) {
     throw new ConfigurationError(issues.length > 0 ? issues : ['unknown configuration error']);
   }
@@ -222,8 +245,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     mediaMaxBytes: data.MEDIA_MAX_BYTES,
     mediaMaxFilesPerCollection: data.MEDIA_MAX_FILES_PER_COLLECTION,
     mediaMaxDimension: data.MEDIA_MAX_DIMENSION,
+    mediaDriver,
     mediaStorageRoot: data.MEDIA_STORAGE_ROOT,
     mediaAllowLocalFilesystem: data.MEDIA_ALLOW_LOCAL_FILESYSTEM === 'true',
+    imagekitUrlEndpoint: (data.IMAGEKIT_URL_ENDPOINT ?? '').trim(),
+    imagekitPublicKey: (data.IMAGEKIT_PUBLIC_KEY ?? '').trim(),
+    imagekitPrivateKey: (data.IMAGEKIT_PRIVATE_KEY ?? '').trim(),
+    imagekitFolder: (data.IMAGEKIT_FOLDER ?? '').trim() || '/araq-kahraman/listings',
     paymentProvider: (data.PAYMENT_PROVIDER ?? '').trim() || null,
     paymentWebhookSecret: (data.PAYMENT_WEBHOOK_SECRET ?? '').trim() || null,
   };
