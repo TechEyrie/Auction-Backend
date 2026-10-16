@@ -53,6 +53,9 @@ export type PublicListingDto = {
   coverAssetId: string | null;
   seller: { sellerReference: string; displayName: string; verificationBadge: boolean };
   featured: boolean;
+  /** Set when `listingMethod` is `fixed_price`. */
+  priceMinor: number | null;
+  availability: ListingDoc['availability'];
   publishedAt: string | null;
   updatedAt: string;
   /** Present when a live auction exists for this listing. Null otherwise. */
@@ -159,6 +162,8 @@ export function toPublicListingDto(
     coverAssetId: listing.coverAssetId,
     seller: context.seller,
     featured: listing.featured.featured,
+    priceMinor: listing.listingMethod === 'fixed_price' ? listing.priceMinor ?? null : null,
+    availability: listing.availability ?? 'available',
     publishedAt: listing.publishedAt ? listing.publishedAt.toISOString() : null,
     updatedAt:
       listing.updatedAt instanceof Date && !Number.isNaN(listing.updatedAt.getTime())
@@ -252,6 +257,8 @@ export function toAdminListingDto(
     archivedReason: listing.archivedReason,
     seller: context.seller,
     featured: listing.featured.featured,
+    priceMinor: listing.listingMethod === 'fixed_price' ? listing.priceMinor ?? null : null,
+    availability: listing.availability ?? 'available',
     publishedAt: listing.publishedAt ? listing.publishedAt.toISOString() : null,
     updatedAt: listing.updatedAt.toISOString(),
     liveLotReference,

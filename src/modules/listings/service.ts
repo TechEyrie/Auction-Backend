@@ -18,11 +18,13 @@ import {
   type Condition,
   type LanguageMode,
   type Audience,
+  type ListingAvailability,
   type ListingDoc,
   type ListingMediaEntry,
   type ListingMethod,
   type ListingWithId,
 } from './models.ts';
+import { createFixedPriceOrder, orderView, type OrderFulfillment } from '../orders/service.ts';
 import {
   bumpListingVersion,
   countListingsByStatus,
@@ -63,6 +65,7 @@ export type ListingWriteInput = {
   moderationState?: 'ok' | 'pending_review' | 'blocked';
   moderationNote?: string | null;
   adminNotes?: string | null;
+  priceMinor?: number | null;
 };
 
 export type Reconciliation = {
@@ -117,6 +120,24 @@ async function liveAuctionContextForListing(db: Db, listingReference: string): P
 
 function fieldError(field: string, message: string): AppError {
   return new AppError('VALIDATION_ERROR', 'Listing is not valid', { fieldErrors: { [field]: message } });
+}
+
+function fixedPriceMinorForWrite(
+  method: ListingMethod,
+  current: number | null | undefined,
+  input: number | null | undefined,
+  inputProvided: boolean,
+): number | null {
+  if (method !== 'fixed_price') return null;
+  const value = inputProvided ? input : current ?? null;
+  if (value === null || value === undefined || !Number.isInteger(value) || value <= 0) {
+    throw fieldError('priceMinor', 'required for fixed-price listings (positive integer minor units)');
+  }
+  return value;
+}
+
+function availabilityDefault(current: ListingAvailability | undefined): ListingAvailability {
+  return current === 'sold' ? 'sold' : 'available';
 }
 
 /** One shared refusal shape, so every attribute problem names the offending field. */
@@ -242,7 +263,7 @@ export function assertConditionApplies(method: ListingMethod, condition: Conditi
 }
 
 export function createListingService(deps: ListingDeps) {
-  const { db, logger, media } = deps;
+  const { db, logger, media, withTransaction } = deps;
   // No collection handle is resolved at construction time: building the app must not require a
   // reachable database, and a stubbed dependency in a unit test is not a licence to connect.
   const attributes = createAttributeService(deps);
@@ -433,6 +454,7 @@ export function createListingService(deps: ListingDeps) {
       const languageMode = input.languageMode ?? 'en';
       const condition = input.condition ?? null;
       assertConditionApplies(method, condition);
+      const priceMinor = fixedPriceMinorForWrite(method, null, input.priceMinor ?? null, input.priceMinor !== undefined);
 
       const currentSchema = await attributes.currentForCategory(category.key);
       const location = await resolveLocation(input.locationKey);
@@ -466,6 +488,8 @@ export function createListingService(deps: ListingDeps) {
         media: [],
         coverAssetId: null,
         featured: { featured: input.featured ?? false, order: input.featuredOrder ?? 0 },
+        priceMinor,
+        availability: 'available',
         adminNotes: input.adminNotes ?? null,
         version: 1,
         createdBy: actor.reference,
@@ -583,6 +607,12 @@ export function createListingService(deps: ListingDeps) {
       const languageMode = input.languageMode ?? current.languageMode;
       const condition = input.condition === undefined ? current.condition : input.condition;
       assertConditionApplies(method, condition);
+      const priceMinor = fixedPriceMinorForWrite(
+        method,
+        current.priceMinor,
+        input.priceMinor,
+        input.priceMinor !== undefined,
+      );
 
       const currentSchema = await attributes.currentForCategory(category.key);
       let reconciliation: Reconciliation | null = null;
@@ -654,6 +684,8 @@ export function createListingService(deps: ListingDeps) {
         location,
         media: mediaEntries,
         coverAssetId,
+        priceMinor,
+        availability: availabilityDefault(current.availability),
         updatedBy: actor.reference,
         updatedAt: now,
       };
@@ -771,6 +803,10 @@ export function createListingService(deps: ListingDeps) {
         if (!location.active) throw fieldError('locationKey', 'the location is inactive');
       }
 
+      if (current.listingMethod === 'fixed_price') {
+        fixedPriceMinorForWrite('fixed_price', current.priceMinor, current.priceMinor, true);
+      }
+
       if (current.media.length === 0) {
         throw fieldError('media', 'a published listing needs at least one image');
       }
@@ -883,6 +919,26 @@ export function createListingService(deps: ListingDeps) {
     /** Exposed for tests and the wizard: the schema the listing must be valid against. */
     async currentSchemaFor(categoryKey: string): Promise<AttributeSchemaWithId | null> {
       return attributes.currentForCategory(categoryKey);
+    },
+
+    async buyFixedPrice(
+      ref: string,
+      buyerUserReference: string,
+      fulfillment: OrderFulfillment,
+    ) {
+      const listing = await findListingByReference(db, ref);
+      if (!listing) throw notFound('Listing not found');
+      if (listing.status !== 'published' || listing.archivedAt || listing.moderation.state === 'blocked') {
+        throw notFound('Listing not found');
+      }
+      return withTransaction(async (session) => {
+        const order = await createFixedPriceOrder(db, {
+          listingReference: ref,
+          buyerUserReference,
+          fulfillment,
+        }, session);
+        return orderView(order);
+      });
     },
 
     /** Exposed for the admin overview and tests: how many drafts/published/archived listings exist. */

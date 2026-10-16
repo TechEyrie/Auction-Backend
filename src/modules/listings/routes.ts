@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { parseInput } from '../../shared/validate.ts';
-import { requireCapability } from '../auth/middleware.ts';
+import { requireActiveUser, requireAuth, requireCapability } from '../auth/middleware.ts';
+import { parseFulfillmentBody } from '../orders/service.ts';
 import { toAdminListingDto, toCustomerListingDto, toPublicListingDto } from './dto.ts';
 import { AUDIENCES, CONDITIONS, LANGUAGE_MODES, LISTING_METHODS, type ListingMethod } from './models.ts';
 import { PUBLIC_SORTS } from './repository.ts';
@@ -67,8 +68,16 @@ const writeSchema = z.object({
   moderationState: z.enum(['ok', 'pending_review', 'blocked']).optional(),
   moderationNote: z.string().max(500).nullable().optional(),
   adminNotes: z.string().max(4000).nullable().optional(),
+  priceMinor: z.number().int().positive().nullable().optional(),
   expectedVersion: z.coerce.number().int().min(1),
 });
+
+const buySchema = z.object({
+  fullName: z.string().min(2).max(120),
+  phone: z.string().min(6).max(40),
+  city: z.string().min(2).max(80),
+  address: z.string().min(6).max(300),
+}).strict();
 
 const versionSchema = z.object({ expectedVersion: z.coerce.number().int().min(1) });
 const archiveSchema = z.object({ reason: z.string().min(3).max(300) });
@@ -134,6 +143,18 @@ export function publicListingRouter(deps: ListingRouterDeps): Router {
           audience: query.audience ?? null,
         },
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/:ref/buy', requireAuth(), requireActiveUser(), async (req, res, next) => {
+    try {
+      const ref = parseInput(listingReferenceSchema, String(req.params.ref), 'Invalid listing reference');
+      const body = parseInput(buySchema, req.body ?? {});
+      const fulfillment = parseFulfillmentBody(body);
+      const order = await service.buyFixedPrice(ref, req.auth!.user.publicReference, fulfillment);
+      res.status(201).json({ order });
     } catch (err) {
       next(err);
     }

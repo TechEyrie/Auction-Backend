@@ -7,7 +7,15 @@ import { AppError } from '../../shared/errors.ts';
 import { parseInput } from '../../shared/validate.ts';
 import { requireActiveUser, requireAuth, requireCapability } from '../auth/middleware.ts';
 import { COLLECTIONS } from '../../db/indexes.ts';
-import { applyVerifiedPayment, assertPaymentSignature, orderView, readOrderForWinner, webhookSecret } from '../orders/service.ts';
+import {
+  applyVerifiedPayment,
+  assertPaymentSignature,
+  orderView,
+  parseFulfillmentBody,
+  readOrderForWinner,
+  updateOrderFulfillment,
+  webhookSecret,
+} from '../orders/service.ts';
 
 const webhookSchema = z.object({
   orderReference: z.string().min(4).max(80),
@@ -80,14 +88,34 @@ export function paymentRouter(deps: { db: Db; config: AppConfig }): Router {
   return router;
 }
 
+const fulfillmentSchema = z.object({
+  fullName: z.string().min(2).max(120),
+  phone: z.string().min(6).max(40),
+  city: z.string().min(2).max(80),
+  address: z.string().min(6).max(300),
+}).strict();
+
 export function orderRouter(deps: { db: Db }): Router {
   const router = Router();
   router.get('/:orderReference', requireAuth(), requireActiveUser(), async (req, res, next) => {
     res.setHeader('Cache-Control', 'private, no-store');
-    res.setHeader('Cache-Control', 'private, no-store');
     try {
       const order = await readOrderForWinner(deps.db, String(req.params.orderReference), req.auth!.user.publicReference);
       res.json({ order });
+    } catch (err) { next(err); }
+  });
+  router.patch('/:orderReference/fulfillment', requireAuth(), requireActiveUser(), async (req, res, next) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    try {
+      const body = parseInput(fulfillmentSchema, req.body ?? {});
+      const fulfillment = parseFulfillmentBody(body);
+      const order = await updateOrderFulfillment(
+        deps.db,
+        String(req.params.orderReference),
+        req.auth!.user.publicReference,
+        fulfillment,
+      );
+      res.json({ order: orderView(order) });
     } catch (err) { next(err); }
   });
   return router;

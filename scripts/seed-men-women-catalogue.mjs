@@ -260,6 +260,7 @@ async function createPublishedListing(staff, seller, spec) {
     description: { en: descriptionFor(spec) },
     attributes: spec.attributes ?? {},
     locationKey: 'qa-doha-al-sadd',
+    ...(spec.listingMethod === 'fixed_price' && spec.priceQar ? { priceMinor: qarToMinor(spec.priceQar) } : {}),
   });
   if (draft.status !== 201) throw new Error(`draft ${draft.status} ${JSON.stringify(draft.body)}`);
   const ref = draft.body.listing.listingReference;

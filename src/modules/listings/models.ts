@@ -10,11 +10,14 @@ import type { AttributeField } from '../attributes/models.ts';
  * than duplicating its truth. A published listing is therefore not a live auction, and nothing in
  * this module may imply that it is.
  *
- * There is likewise no price field. Fixed-price checkout is an unapproved feature (docs/00), so
- * nothing stores or displays an amount yet — see docs/OPEN_QUESTIONS.md OQ-15/OQ-48.
+ * Fixed-price listings carry `priceMinor` (integer QAR fils). Checkout reserves inventory via
+ * `availability` — see orders module and owner-approved dev Buy Now flow (docs/OPEN_QUESTIONS.md).
  */
 
 export const LISTING_STATUSES = ['draft', 'published', 'archived'] as const;
+
+export const LISTING_AVAILABILITIES = ['available', 'sold'] as const;
+export type ListingAvailability = (typeof LISTING_AVAILABILITIES)[number];
 export type ListingStatus = (typeof LISTING_STATUSES)[number];
 
 /** Mirrors the taxonomy's allowed listing methods so a category can never be over-promised. */
@@ -103,6 +106,11 @@ export type ListingDoc = {
   coverAssetId: string | null;
 
   featured: { featured: boolean; order: number };
+
+  /** Whole-QAR fils. Required when `listingMethod` is `fixed_price`. */
+  priceMinor: number | null;
+  /** Commerce state for fixed-price (and sold auction inventory). */
+  availability: ListingAvailability;
 
   /** Private staff notes. Never leaves the admin DTO. */
   adminNotes: string | null;

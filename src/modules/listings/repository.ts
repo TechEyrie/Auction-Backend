@@ -83,7 +83,11 @@ export function publicVisibilityFilter(): Record<string, unknown> {
 }
 
 export function buildPublicFilter(query: PublicListQuery): Record<string, unknown> {
-  const filter: Record<string, unknown> = publicVisibilityFilter();
+  const filter: Record<string, unknown> = {
+    ...publicVisibilityFilter(),
+    // Sold listings remain reachable by direct URL; omit them from catalogue browse.
+    $or: [{ availability: { $ne: 'sold' } }, { availability: { $exists: false } }],
+  };
   if (query.categoryKeys && query.categoryKeys.length > 0) {
     // The path snapshot contains the category itself, so descendants match their parent key too.
     filter.categoryPath = { $in: query.categoryKeys };

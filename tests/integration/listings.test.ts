@@ -245,6 +245,7 @@ async function createPublishedListing(options: {
   image?: Buffer;
   imageType?: string;
   audience?: string;
+  priceMinor?: number;
 }): Promise<{ reference: string; assetId: string; version: number }> {
   const draft = await createDraft({
     ...(options.categoryKey ? { categoryKey: options.categoryKey } : {}),
@@ -252,6 +253,7 @@ async function createPublishedListing(options: {
     ...(options.languageMode ? { languageMode: options.languageMode } : {}),
     ...(options.sellerReference ? { sellerReference: options.sellerReference } : {}),
     ...(options.listingMethod ? { listingMethod: options.listingMethod } : {}),
+    ...(options.listingMethod === 'fixed_price' ? { priceMinor: options.priceMinor ?? 45_000 } : {}),
     ...(options.attributes ? { attributes: options.attributes } : {}),
     ...(options.featured !== undefined ? { featured: options.featured } : {}),
     ...(options.locationKey !== undefined ? { locationKey: options.locationKey } : {}),
@@ -1063,7 +1065,12 @@ test('P05-E07 discovery filters, sorts and paginates deterministically', async (
   assert.equal(allBody.total >= 5, true);
   assert.equal(allBody.sort, 'recent');
   assert.ok(allBody.listings.every((entry) => entry.coverAssetId !== null), 'a public card always has a cover');
-  const publishedCount = await handle.db.collection(COLLECTIONS.listings).countDocuments({ status: 'published', archivedAt: null, 'moderation.state': { $ne: 'blocked' } });
+  const publishedCount = await handle.db.collection(COLLECTIONS.listings).countDocuments({
+    status: 'published',
+    archivedAt: null,
+    'moderation.state': { $ne: 'blocked' },
+    $or: [{ availability: { $ne: 'sold' } }, { availability: { $exists: false } }],
+  });
   assert.equal(allBody.total, publishedCount, 'public totals must match the real published set, not a seeded approximation');
 
   // Category filtering includes descendants.
@@ -1286,4 +1293,61 @@ test('P05-E13 the wizard can explain every refusal without a fake success path',
   const failure = await fetch(`${baseUrl}/api/listings/l_aaaaaaaaa`);
   const failureBody = (await failure.json()) as { error: Record<string, unknown> };
   assert.equal(Object.keys(failureBody.error).sort().join(','), 'code,details,fieldErrors,message,requestId');
+});
+
+test('fixed-price buy reserves inventory, pays once, and refuses publish without price', async () => {
+  const priceMinor = 32_000;
+  const published = await createPublishedListing({
+    categoryKey: 'cars',
+    titleEn: 'Buy now sedan',
+    listingMethod: 'fixed_price',
+    priceMinor,
+    attributes: { make: 'toyota', model: 'Buy now sedan' },
+  });
+
+  const noPriceDraft = await createDraft({
+    categoryKey: 'cars',
+    title: { en: 'Missing price draft' },
+    description: { en: 'Description long enough for validation rules.' },
+    attributes: { make: 'toyota', model: 'Missing price' },
+  });
+  const asset = await upload(`listing_${noPriceDraft.listingReference}`, png(30, 30));
+  const attached = await attachMedia(noPriceDraft.listingReference, noPriceDraft.version, [asset.body.asset!.assetId]);
+  const switched = await patchListing(noPriceDraft.listingReference, {
+    expectedVersion: (attached.body as { listing: ListingDto }).listing.version,
+    listingMethod: 'fixed_price',
+  });
+  assert.equal(switched.status, 422);
+  assert.ok((switched.body as { error: { fieldErrors: Record<string, string> } }).error.fieldErrors.priceMinor);
+
+  const fulfillment = {
+    fullName: 'Test Buyer',
+    phone: '55556099',
+    city: 'Doha',
+    address: 'Al Sadd Street 12',
+  };
+  const buy = await customer.post<{ order: { orderReference: string; winningPriceMinor: number; source: string } }>(
+    `/api/listings/${published.reference}/buy`,
+    fulfillment,
+  );
+  assert.equal(buy.status, 201);
+  assert.equal(buy.body.order.source, 'fixed_price');
+  assert.equal(buy.body.order.winningPriceMinor, priceMinor);
+
+  const stored = await handle.db.collection(COLLECTIONS.listings).findOne({ listingReference: published.reference });
+  assert.equal(stored?.availability, 'sold');
+
+  const secondBuy = await customer.post(`/api/listings/${published.reference}/buy`, fulfillment);
+  assert.equal(secondBuy.status, 409);
+
+  const browse = await fetch(`${baseUrl}/api/listings?method=fixed_price&limit=48`);
+  const browseRefs = ((await browse.json()) as { listings: Array<{ listingReference: string }> }).listings.map((e) => e.listingReference);
+  assert.equal(browseRefs.includes(published.reference), false);
+  assert.equal((await publicListing(published.reference)).status, 200);
+
+  const pay = await customer.post<{ order: { paymentState: string } }>('/api/payments/complete', {
+    orderReference: buy.body.order.orderReference,
+  });
+  assert.equal(pay.status, 200);
+  assert.equal(pay.body.order.paymentState, 'paid');
 });

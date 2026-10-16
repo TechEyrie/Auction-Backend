@@ -182,7 +182,12 @@ export const INDEX_SPECS: Record<CollectionName, IndexDescription[]> = {
   ],
   [COLLECTIONS.orders]: [
     { key: { orderReference: 1 }, name: 'uniq_order', unique: true },
-    { key: { lotReference: 1 }, name: 'uniq_order_lot', unique: true },
+    {
+      key: { lotReference: 1 },
+      name: 'uniq_order_lot',
+      unique: true,
+      partialFilterExpression: { lotReference: { $type: 'string' } },
+    },
     { key: { winnerUserReference: 1, createdAt: -1 }, name: 'rq_order_winner' },
   ],
   [COLLECTIONS.financialEntries]: [
@@ -208,6 +213,11 @@ export async function ensureIndexes(db: Db): Promise<void> {
       const current = await collection.indexes().catch((err: { code?: number }) => (err.code === 26 ? [] : Promise.reject(err)));
       const phone = current.find((index) => index.name === 'uniq_phone');
       if (phone && !phone.partialFilterExpression) await collection.dropIndex('uniq_phone');
+    }
+    if (name === COLLECTIONS.orders) {
+      const current = await collection.indexes().catch((err: { code?: number }) => (err.code === 26 ? [] : Promise.reject(err)));
+      const lot = current.find((index) => index.name === 'uniq_order_lot');
+      if (lot && !lot.partialFilterExpression) await collection.dropIndex('uniq_order_lot');
     }
     await collection.createIndexes(specs);
   }
