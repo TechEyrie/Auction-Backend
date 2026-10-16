@@ -167,7 +167,7 @@ export function publicListingRouter(deps: ListingRouterDeps): Router {
         String(req.params.ref),
         'Invalid listing address',
       );
-      const listing = await service.getPublic(ref);
+      const listing = await service.getPublic(ref, req.auth?.user.publicReference ?? null);
       const context = await service.publicDtoContext(listing);
       // A signed-in customer gets the customer projection; today it is deliberately identical to
       // the public one, so nothing private can arrive through a session.
@@ -187,7 +187,7 @@ export function publicListingRouter(deps: ListingRouterDeps): Router {
     try {
       const ref = parseInput(listingReferenceSchema, String(req.params.ref), 'Invalid listing reference');
       const assetId = parseInput(assetIdSchema, String(req.params.assetId), 'Invalid media reference');
-      const { mime } = await service.resolvePublicMedia(ref, assetId);
+      const { mime } = await service.resolvePublicMedia(ref, assetId, req.auth?.user.publicReference ?? null);
       const bytes = await service.readPublicMedia(assetId);
       res.setHeader('Content-Type', mime);
       // Non-executable serving, same as the staff preview: never inline a type a browser can script.

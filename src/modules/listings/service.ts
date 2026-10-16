@@ -90,9 +90,18 @@ export type ListingLiveAuctionContext = {
   endsAt: string | null;
 };
 
+/** Live for discovery/DTO only while the clock is inside [startsAt, endsAt). */
+function activeLiveAuctionFilter(now = new Date()): Record<string, unknown> {
+  return {
+    status: 'live',
+    startsAt: { $lte: now },
+    endsAt: { $gt: now },
+  };
+}
+
 async function liveAuctionContextForListing(db: Db, listingReference: string): Promise<ListingLiveAuctionContext> {
   const live = await db.collection(COLLECTIONS.auctions).findOne(
-    { listingReference, status: 'live' },
+    { listingReference, ...activeLiveAuctionFilter() },
     {
       projection: {
         lotReference: 1,
@@ -116,6 +125,62 @@ async function liveAuctionContextForListing(db: Db, listingReference: string): P
     startsAt,
     endsAt,
   };
+}
+
+/**
+ * Auction listings are public only while bidding is open. After the end time (or before start),
+ * they disappear from catalogue and direct URLs — except the high bidder / winner, who still
+ * needs the product page to pay.
+ */
+async function assertAuctionPubliclyVisible(
+  db: Db,
+  listing: ListingWithId,
+  viewerReference: string | null | undefined,
+): Promise<void> {
+  if (listing.listingMethod !== 'auction') return;
+
+  const now = new Date();
+  const liveInWindow = await db.collection(COLLECTIONS.auctions).findOne({
+    listingReference: listing.listingReference,
+    ...activeLiveAuctionFilter(now),
+  });
+  if (liveInWindow) return;
+
+  if (viewerReference) {
+    const auction = await db.collection(COLLECTIONS.auctions).findOne(
+      {
+        listingReference: listing.listingReference,
+        status: { $in: ['live', 'closed'] },
+      },
+      {
+        projection: {
+          status: 1,
+          endsAt: 1,
+          winningUserReference: 1,
+          highestUserReference: 1,
+        },
+        sort: { updatedAt: -1 },
+      },
+    );
+    if (auction) {
+      const ended =
+        auction.status === 'closed' ||
+        (auction.endsAt instanceof Date && auction.endsAt.getTime() <= now.getTime());
+      if (ended) {
+        if (auction.winningUserReference === viewerReference || auction.highestUserReference === viewerReference) {
+          return;
+        }
+      }
+    }
+
+    const order = await db.collection(COLLECTIONS.orders).findOne({
+      listingReference: listing.listingReference,
+      winnerUserReference: viewerReference,
+    });
+    if (order) return;
+  }
+
+  throw notFound('Listing not found');
 }
 
 function fieldError(field: string, message: string): AppError {
@@ -522,7 +587,7 @@ export function createListingService(deps: ListingDeps) {
       return listing;
     },
 
-    async getPublic(key: string): Promise<ListingWithId> {
+    async getPublic(key: string, viewerReference?: string | null): Promise<ListingWithId> {
       const listing = key.startsWith('l_')
         ? await findListingByReference(db, key)
         : await findListingBySlug(db, key);
@@ -532,7 +597,9 @@ export function createListingService(deps: ListingDeps) {
         await db.collection<ListingDoc>(COLLECTIONS.listings).updateOne({ listingReference: listing.listingReference }, { $set: { slug } });
         listing.slug = slug;
       }
-      return requireVisible(listing.listingReference);
+      const visible = await requireVisible(listing.listingReference);
+      await assertAuctionPubliclyVisible(db, visible, viewerReference);
+      return visible;
     },
 
     async listPublic(query: PublicListQuery): Promise<Paged<ListingWithId>> {
@@ -546,7 +613,7 @@ export function createListingService(deps: ListingDeps) {
       }
       const liveAuctionListingReferences = await db
         .collection(COLLECTIONS.auctions)
-        .distinct('listingReference', { status: 'live' });
+        .distinct('listingReference', activeLiveAuctionFilter());
       expanded.liveAuctionListingReferences = liveAuctionListingReferences.filter(
         (ref): ref is string => typeof ref === 'string',
       );
@@ -893,8 +960,13 @@ export function createListingService(deps: ListingDeps) {
      * settlement evidence included — resolves to the same 404 as a non-existent asset, so the
      * response cannot be used to probe what exists.
      */
-    async resolvePublicMedia(ref: string, assetId: string): Promise<{ assetId: string; mime: string }> {
+    async resolvePublicMedia(
+      ref: string,
+      assetId: string,
+      viewerReference?: string | null,
+    ): Promise<{ assetId: string; mime: string }> {
       const listing = await requireVisible(ref);
+      await assertAuctionPubliclyVisible(db, listing, viewerReference);
       if (!listing.media.some((entry) => entry.assetId === assetId)) {
         throw notFound('Media not found');
       }
