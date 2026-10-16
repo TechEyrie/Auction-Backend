@@ -965,6 +965,8 @@ test('P05-E06 public image access is authorized by the published listing, nothin
   assert.equal(served.status, 200);
   assert.equal(served.headers.get('content-type'), 'image/png');
   assert.equal(served.headers.get('x-content-type-options'), 'nosniff');
+  // cross-origin so a separate frontend host (e.g. Vercel) can embed these in <img>.
+  assert.equal(served.headers.get('cross-origin-resource-policy'), 'cross-origin');
   assert.deepEqual([...served.bytes.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   assert.equal(served.bytes.length, png(60, 45).length);
 

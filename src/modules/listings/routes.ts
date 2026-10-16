@@ -194,6 +194,9 @@ export function publicListingRouter(deps: ListingRouterDeps): Router {
       res.setHeader('Content-Disposition', 'inline');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+      // Override securityHeaders' same-site CORP: listing images are loaded by <img> from the
+      // separate frontend origin (e.g. Vercel → Render). same-site blocks that as NotSameSite.
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
       // The URL is content-addressed per asset and authorization is re-checked on every request;
       // a short public lifetime keeps ordinary browsing cheap without letting a cached copy
       // outlive the visibility decision by much. Archiving stops new authorizations immediately.

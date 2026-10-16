@@ -88,6 +88,8 @@ export function adminMediaRouter(deps: MediaRouterDeps): Router {
       res.setHeader('Content-Disposition', 'inline');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+      // Admin UI may be on a different origin than the API; allow <img> preview loads.
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
       res.setHeader('Cache-Control', 'private, max-age=60');
       res.status(200).end(bytes);
     } catch (err) {
