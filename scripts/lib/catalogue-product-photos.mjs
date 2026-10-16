@@ -129,17 +129,50 @@ export async function downloadPhotoForListingTitle(title) {
   return downloadProductPhotoBytes([primary, fallback, GENERIC_FALLBACK]);
 }
 
+/** @param {string} filePath */
+export function mimeFromPath(filePath) {
+  const lower = filePath.toLowerCase();
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  throw new Error(`unsupported image extension: ${filePath}`);
+}
+
+/** @param {Buffer} buffer */
+export function detectMimeFromBuffer(buffer) {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (buffer.length >= 8 && buffer.subarray(0, 8).toString('hex') === '89504e470d0a1a0a') {
+    return 'image/png';
+  }
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('latin1') === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  throw new Error('unrecognized image bytes');
+}
+
+/** @param {Buffer} buffer @param {string} filePath */
+export function mimeForUpload(buffer, filePath) {
+  return detectMimeFromBuffer(buffer);
+}
+
 /**
  * @param {{ csrf: string | null, cookieHeader: () => string }} staff
  * @param {string} apiBase
  * @param {string} collectionKey
  * @param {Buffer} body
+ * @param {'image/jpeg' | 'image/png' | 'image/webp'} mime
  */
-export async function uploadListingJpeg(staff, apiBase, collectionKey, body) {
+export async function uploadListingImage(staff, apiBase, collectionKey, body, mime) {
   const upload = await fetch(`${apiBase}/api/admin/media/upload`, {
     method: 'POST',
     headers: {
-      'content-type': 'image/jpeg',
+      'content-type': mime,
       'x-collection-key': collectionKey,
       'x-csrf-token': staff.csrf ?? '',
       cookie: staff.cookieHeader(),
@@ -153,6 +186,16 @@ export async function uploadListingJpeg(staff, apiBase, collectionKey, body) {
   const assetId = uploadBody.asset?.assetId;
   if (!assetId) throw new Error(`media upload missing assetId ${JSON.stringify(uploadBody)}`);
   return assetId;
+}
+
+/**
+ * @param {{ csrf: string | null, cookieHeader: () => string }} staff
+ * @param {string} apiBase
+ * @param {string} collectionKey
+ * @param {Buffer} body
+ */
+export async function uploadListingJpeg(staff, apiBase, collectionKey, body) {
+  return uploadListingImage(staff, apiBase, collectionKey, body, 'image/jpeg');
 }
 
 /** Known catalogue titles from seed-men-women-catalogue.mjs */
