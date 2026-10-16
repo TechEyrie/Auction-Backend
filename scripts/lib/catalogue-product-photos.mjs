@@ -164,9 +164,9 @@ export const CATALOGUE_TITLES = [
   'Brass Mabkhara (Incense Burner)',
   'Gold-Tone Bangles Set',
   'Embroidered Abaya Clutch',
-  'Rose Oud Perfume — 50 ml — 280 QAR',
+  'Rose Oud Perfume — 50 ml',
   'Qatari Pearl Necklace',
-  'Bakhoor Gift Box — 180 QAR',
+  'Bakhoor Gift Box',
 ];
 
 /**

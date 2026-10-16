@@ -12,8 +12,40 @@ const STAFF_PASSWORD = process.env.E2E_STAFF_PASSWORD ?? 'DevOperator1';
 const TOTP_SECRET = process.env.E2E_STAFF_TOTP ?? '5YQ2BFAT5HZJYPNXEF557HIXSMB7P3YL';
 const ARCHIVE_REASON = 'Owner reset — Qatari accessories catalogue refresh';
 
-const AUCTION_ENDS_IN_MS = 4 * 60 * 60 * 1000;
-const STARTS_OFFSET_MS = 60 * 1000;
+/** Auctions stay live long enough for demos (14 days). Starts slightly in the past so the lot is in-window immediately. */
+const AUCTION_ENDS_IN_MS = 14 * 24 * 60 * 60 * 1000;
+const STARTS_OFFSET_MS = 2 * 60 * 1000;
+
+const RETRYABLE_STATUS = new Set([502, 503, 504]);
+const MAX_ATTEMPTS = 5;
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * @template T
+ * @param {string} label
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+async function withRetry(label, fn) {
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const retryable = RETRYABLE_STATUS.has(Number(msg.match(/\b(50[234])\b/)?.[1])) || /502|503|504|fetch failed|ECONNRESET|ETIMEDOUT/i.test(msg);
+      if (!retryable || attempt === MAX_ATTEMPTS) throw err;
+      const waitMs = 2_000 * attempt;
+      console.warn(`${label}: attempt ${attempt}/${MAX_ATTEMPTS} failed (${msg.slice(0, 120)}); retrying in ${waitMs}ms`);
+      await sleep(waitMs);
+    }
+  }
+  throw lastErr;
+}
 
 /** @type {Array<Record<string, unknown>>} */
 const CATALOGUE = [
@@ -88,7 +120,7 @@ const CATALOGUE = [
   },
   {
     audience: 'women',
-    title: 'Rose Oud Perfume — 50 ml — 280 QAR',
+    title: 'Rose Oud Perfume — 50 ml',
     categoryKey: 'general',
     listingMethod: 'fixed_price',
     condition: 'new',
@@ -107,7 +139,7 @@ const CATALOGUE = [
   },
   {
     audience: 'women',
-    title: 'Bakhoor Gift Box — 180 QAR',
+    title: 'Bakhoor Gift Box',
     categoryKey: 'general',
     listingMethod: 'fixed_price',
     condition: 'new',
@@ -243,61 +275,71 @@ async function ensureSeller(staff) {
 
 function descriptionFor(spec) {
   if (spec.listingMethod === 'fixed_price' && spec.priceQar) {
-    return `Buy now for ${spec.priceQar.toLocaleString('en-QA')} QAR. ${spec.title.replace(/ — [\d,]+ QAR$/, '')} in great condition. Pickup in Doha.`;
+    return `Buy now for ${spec.priceQar.toLocaleString('en-QA')} QR. ${spec.title} in great condition. Pickup in Doha.`;
   }
   return `Live auction listing: ${spec.title}. Well cared for; see photos. Located in Al Sadd, Doha.`;
 }
 
 async function createPublishedListing(staff, seller, spec) {
-  const draft = await staff.post('/api/admin/listings', {
-    sellerReference: seller,
-    categoryKey: spec.categoryKey,
-    listingMethod: spec.listingMethod,
-    languageMode: 'en',
-    audience: spec.audience,
-    condition: spec.condition,
-    title: { en: spec.title },
-    description: { en: descriptionFor(spec) },
-    attributes: spec.attributes ?? {},
-    locationKey: 'qa-doha-al-sadd',
-    ...(spec.listingMethod === 'fixed_price' && spec.priceQar ? { priceMinor: qarToMinor(spec.priceQar) } : {}),
+  return withRetry(`create ${spec.title}`, async () => {
+    const draft = await staff.post('/api/admin/listings', {
+      sellerReference: seller,
+      categoryKey: spec.categoryKey,
+      listingMethod: spec.listingMethod,
+      languageMode: 'en',
+      audience: spec.audience,
+      condition: spec.condition,
+      title: { en: spec.title },
+      description: { en: descriptionFor(spec) },
+      attributes: spec.attributes ?? {},
+      locationKey: 'qa-doha-al-sadd',
+      ...(spec.listingMethod === 'fixed_price' && spec.priceQar ? { priceMinor: qarToMinor(spec.priceQar) } : {}),
+    });
+    if (draft.status !== 201) throw new Error(`draft ${draft.status} ${JSON.stringify(draft.body)}`);
+    const ref = draft.body.listing.listingReference;
+    let version = draft.body.listing.version;
+    const collectionKey = draft.body.listing.mediaCollectionKey ?? `listing_${ref}`;
+
+    const jpeg = await downloadPhotoForListingTitle(spec.title);
+    const assetId = await uploadListingJpeg(staff, API, collectionKey, jpeg);
+
+    const patched = await staff.patch(`/api/admin/listings/${ref}`, {
+      expectedVersion: version,
+      media: [{ assetId, alt: { en: spec.title } }],
+      coverAssetId: assetId,
+    });
+    if (patched.status !== 200) throw new Error(`patch ${patched.status} ${JSON.stringify(patched.body)}`);
+    version = patched.body.listing.version;
+
+    const pub = await staff.post(`/api/admin/listings/${ref}/publish`, { expectedVersion: version });
+    if (pub.status !== 200) throw new Error(`publish ${pub.status} ${JSON.stringify(pub.body)}`);
+    return ref;
   });
-  if (draft.status !== 201) throw new Error(`draft ${draft.status} ${JSON.stringify(draft.body)}`);
-  const ref = draft.body.listing.listingReference;
-  let version = draft.body.listing.version;
-  const collectionKey = draft.body.listing.mediaCollectionKey ?? `listing_${ref}`;
-
-  const jpeg = await downloadPhotoForListingTitle(spec.title);
-  const assetId = await uploadListingJpeg(staff, API, collectionKey, jpeg);
-
-  const patched = await staff.patch(`/api/admin/listings/${ref}`, {
-    expectedVersion: version,
-    media: [{ assetId, alt: { en: spec.title } }],
-    coverAssetId: assetId,
-  });
-  if (patched.status !== 200) throw new Error(`patch ${patched.status} ${JSON.stringify(patched.body)}`);
-  version = patched.body.listing.version;
-
-  const pub = await staff.post(`/api/admin/listings/${ref}/publish`, { expectedVersion: version });
-  if (pub.status !== 200) throw new Error(`publish ${pub.status} ${JSON.stringify(pub.body)}`);
-  return ref;
 }
 
 async function openLiveAuction(staff, listingReference, startingBidMinor, incrementMinor) {
-  const now = Date.now();
-  const created = await staff.post('/api/admin/auctions', {
-    listingReference,
-    startingBidMinor,
-    incrementMinor,
-    startsAt: new Date(now - STARTS_OFFSET_MS).toISOString(),
-    endsAt: new Date(now + AUCTION_ENDS_IN_MS).toISOString(),
+  return withRetry(`open auction ${listingReference}`, async () => {
+    const now = Date.now();
+    const startsAt = new Date(now - STARTS_OFFSET_MS).toISOString();
+    const endsAt = new Date(now + AUCTION_ENDS_IN_MS).toISOString();
+    const created = await staff.post('/api/admin/auctions', {
+      listingReference,
+      startingBidMinor,
+      incrementMinor,
+      startsAt,
+      endsAt,
+    });
+    if (created.status !== 201) throw new Error(`create auction ${created.status} ${JSON.stringify(created.body)}`);
+    const lot = created.body.auction.lotReference;
+    const opened = await staff.post(`/api/admin/auctions/${lot}/open`);
+    if (opened.status !== 200) throw new Error(`open ${opened.status} ${JSON.stringify(opened.body)}`);
+    if (opened.body.auction.status !== 'live') throw new Error(`expected live got ${opened.body.auction.status}`);
+    return {
+      lotReference: lot,
+      startsAt: created.body.auction.startsAt ?? startsAt,
+      endsAt: created.body.auction.endsAt ?? endsAt,
+    };
   });
-  if (created.status !== 201) throw new Error(`create auction ${created.status} ${JSON.stringify(created.body)}`);
-  const lot = created.body.auction.lotReference;
-  const opened = await staff.post(`/api/admin/auctions/${lot}/open`);
-  if (opened.status !== 200) throw new Error(`open ${opened.status} ${JSON.stringify(opened.body)}`);
-  if (opened.body.auction.status !== 'live') throw new Error(`expected live got ${opened.body.auction.status}`);
-  return { lotReference: lot, endsAt: created.body.auction.endsAt ?? new Date(now + AUCTION_ENDS_IN_MS).toISOString() };
 }
 
 async function verifyPublicShelf() {
@@ -374,6 +416,7 @@ async function main() {
 
   const created = [];
   for (const spec of CATALOGUE) {
+    console.log(`seeding: ${spec.title} (${spec.listingMethod})`);
     const listingReference = await createPublishedListing(staff, seller, spec);
     const row = {
       title: spec.title,
@@ -390,6 +433,7 @@ async function main() {
         qarToMinor(spec.incrementQar),
       );
       row.lotReference = auction.lotReference;
+      row.startsAt = auction.startsAt;
       row.endsAt = auction.endsAt;
       row.startingQar = spec.startingQar;
       row.incrementQar = spec.incrementQar;
@@ -397,6 +441,8 @@ async function main() {
       row.priceQar = spec.priceQar;
     }
     created.push(row);
+    // Brief pause so Render free-tier does not 502 mid-batch.
+    await sleep(1_500);
   }
 
   const verification = await verifyPublicShelf();
