@@ -173,7 +173,9 @@ export function createAuctionService(deps: { db: Db; withTransaction: Tx }) {
           const auction = await auctions().findOne({ lotReference: input.lot }, { session });
           if (!auction) throw new AppError('NOT_FOUND', 'Auction not found');
           if (auction.publishedBy === input.userReference) throw new AppError('FORBIDDEN', 'The auction owner cannot bid');
-          const eligible = auction.status === 'live' && auction.startsAt <= acceptedAt && auction.endsAt > acceptedAt;
+          const inWindow = auction.startsAt <= acceptedAt && auction.endsAt > acceptedAt;
+          const eligible =
+            inWindow && (auction.status === 'live' || auction.status === 'scheduled');
           if (!eligible || auction.version !== input.expectedVersion) {
             throw conflict('Bid was not accepted', { auction: stateOf(auction) });
           }
@@ -213,9 +215,16 @@ export function createAuctionService(deps: { db: Db; withTransaction: Tx }) {
           };
           const inserted = await bids().insertOne(bid, { session });
           const updated = await auctions().findOneAndUpdate(
-            { _id: auction._id, version: auction.version, status: 'live', endsAt: { $gt: acceptedAt } },
+            {
+              _id: auction._id,
+              version: auction.version,
+              status: { $in: ['live', 'scheduled'] },
+              startsAt: { $lte: acceptedAt },
+              endsAt: { $gt: acceptedAt },
+            },
             {
               $set: {
+                status: 'live',
                 currentAmountMinor: amountMinor,
                 highestBidId: inserted.insertedId,
                 highestUserReference: input.userReference,

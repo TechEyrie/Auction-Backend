@@ -184,6 +184,29 @@ test('live auction inside the window is public; outside the window it disappears
   assert.equal(hidden.status, 404);
 });
 
+test('scheduled lot that has reached its start time is already public', async () => {
+  const ref = await publishAuctionListing('Scheduled-but-due jacket');
+  const now = Date.now();
+  // starts slightly in the future so open() stores status=scheduled…
+  const lot = await openLot(ref, new Date(now + 2_000), new Date(now + 180_000));
+  const row = await handle.db.collection(COLLECTIONS.auctions).findOne({ lotReference: lot });
+  assert.equal(row?.status, 'scheduled');
+
+  // …then move start into the past without promoting status (closer lag).
+  await handle.db.collection(COLLECTIONS.auctions).updateOne(
+    { lotReference: lot },
+    { $set: { startsAt: new Date(Date.now() - 1_000) } },
+  );
+
+  const listed = await fetch(`${baseUrl}/api/listings?method=auction&limit=48`);
+  assert.equal(listed.status, 200);
+  const body = (await listed.json()) as { listings: Array<{ listingReference: string }> };
+  assert.ok(body.listings.some((row) => row.listingReference === ref));
+
+  const detail = await fetch(`${baseUrl}/api/listings/${ref}`);
+  assert.equal(detail.status, 200);
+});
+
 test('after the auction ends, only the high bidder can open the product', async () => {
   const ref = await publishAuctionListing('Winner-only payment jacket');
   const now = Date.now();

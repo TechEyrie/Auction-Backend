@@ -90,10 +90,15 @@ export type ListingLiveAuctionContext = {
   endsAt: string | null;
 };
 
-/** Live for discovery/DTO only while the clock is inside [startsAt, endsAt). */
+/**
+ * Public while the clock is inside [startsAt, endsAt).
+ * `scheduled` is included once start has arrived — otherwise a lot that was opened a few
+ * seconds early stays invisible until the 5s closer promotes it to `live`.
+ * Comparisons use UTC instants (Mongo Date / Date.now). Qatar is only for admin input UI.
+ */
 function activeLiveAuctionFilter(now = new Date()): Record<string, unknown> {
   return {
-    status: 'live',
+    status: { $in: ['live', 'scheduled'] },
     startsAt: { $lte: now },
     endsAt: { $gt: now },
   };
