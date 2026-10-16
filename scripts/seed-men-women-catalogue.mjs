@@ -1,5 +1,5 @@
 /**
- * Archive existing inventory and seed 10 men/women lifestyle listings (7 live auctions + 3 fixed price).
+ * Archive existing inventory and seed 10 Qatari accessories (7 live auctions + 3 fixed price).
  * Usage from backend/: node --env-file-if-exists=.env scripts/seed-men-women-catalogue.mjs
  */
 import { generateTotp } from '../src/shared/totp.ts';
@@ -10,7 +10,7 @@ const API = process.env.E2E_API ?? 'http://localhost:4000';
 const STAFF_EMAIL = process.env.E2E_STAFF_EMAIL ?? 'operator.dev@example.com';
 const STAFF_PASSWORD = process.env.E2E_STAFF_PASSWORD ?? 'DevOperator1';
 const TOTP_SECRET = process.env.E2E_STAFF_TOTP ?? '5YQ2BFAT5HZJYPNXEF557HIXSMB7P3YL';
-const ARCHIVE_REASON = 'Owner reset — men/women catalogue refresh';
+const ARCHIVE_REASON = 'Owner reset — Qatari accessories catalogue refresh';
 
 const AUCTION_ENDS_IN_MS = 4 * 60 * 60 * 1000;
 const STARTS_OFFSET_MS = 60 * 1000;
@@ -19,100 +19,100 @@ const STARTS_OFFSET_MS = 60 * 1000;
 const CATALOGUE = [
   {
     audience: 'men',
-    title: "Men's Classic Chronograph Watch",
-    categoryKey: 'electronics',
+    title: 'Amber Misbaha (Tasbeeh) — 99 beads',
+    categoryKey: 'general',
     listingMethod: 'auction',
-    condition: 'used',
-    attributes: { brand: 'other', model_name: 'Classic Chronograph' },
-    startingQar: 800,
-    incrementQar: 50,
-  },
-  {
-    audience: 'men',
-    title: "Men's Leather Bomber Jacket",
-    categoryKey: 'clothing',
-    listingMethod: 'auction',
-    condition: 'used',
-    attributes: {},
-    startingQar: 450,
+    condition: 'like_new',
+    attributes: { item_condition: 'like-new', brand_name: 'Souq Waqif' },
+    startingQar: 350,
     incrementQar: 25,
   },
   {
     audience: 'men',
-    title: "Men's Mountain Bike — 21-speed",
-    categoryKey: 'sports',
+    title: 'Qatari Oud Oil Attar Set',
+    categoryKey: 'general',
     listingMethod: 'auction',
-    condition: 'used',
-    attributes: {},
-    startingQar: 1_200,
-    incrementQar: 50,
+    condition: 'new',
+    attributes: { item_condition: 'new', brand_name: 'Doha Oud' },
+    startingQar: 500,
+    incrementQar: 30,
   },
   {
     audience: 'men',
-    title: "Men's Running Sneakers — 450 QAR",
+    title: 'Silver Khanjar Cufflinks',
+    categoryKey: 'general',
+    listingMethod: 'auction',
+    condition: 'like_new',
+    attributes: { item_condition: 'like-new', brand_name: 'Gulf Silver' },
+    startingQar: 280,
+    incrementQar: 20,
+  },
+  {
+    audience: 'men',
+    title: "Men's Bisht Cloak — black & gold",
     categoryKey: 'clothing',
     listingMethod: 'fixed_price',
     condition: 'like_new',
     attributes: {},
-    priceQar: 450,
+    priceQar: 1_800,
   },
   {
     audience: 'men',
-    title: "Men's Wool Overcoat",
-    categoryKey: 'clothing',
+    title: 'Brass Mabkhara (Incense Burner)',
+    categoryKey: 'general',
     listingMethod: 'auction',
     condition: 'used',
+    attributes: { item_condition: 'used', brand_name: 'Traditional' },
+    startingQar: 220,
+    incrementQar: 15,
+  },
+  {
+    audience: 'women',
+    title: 'Gold-Tone Bangles Set',
+    categoryKey: 'general',
+    listingMethod: 'auction',
+    condition: 'like_new',
+    attributes: { item_condition: 'like-new', brand_name: 'Pearl Qatar' },
+    startingQar: 420,
+    incrementQar: 25,
+  },
+  {
+    audience: 'women',
+    title: 'Embroidered Abaya Clutch',
+    categoryKey: 'clothing',
+    listingMethod: 'auction',
+    condition: 'new',
     attributes: {},
-    startingQar: 600,
+    startingQar: 300,
+    incrementQar: 20,
+  },
+  {
+    audience: 'women',
+    title: 'Rose Oud Perfume — 50 ml — 280 QAR',
+    categoryKey: 'general',
+    listingMethod: 'fixed_price',
+    condition: 'new',
+    attributes: { item_condition: 'new', brand_name: 'Arabian Rose' },
+    priceQar: 280,
+  },
+  {
+    audience: 'women',
+    title: 'Qatari Pearl Necklace',
+    categoryKey: 'general',
+    listingMethod: 'auction',
+    condition: 'like_new',
+    attributes: { item_condition: 'like-new', brand_name: 'Al Zubarah' },
+    startingQar: 650,
     incrementQar: 40,
   },
   {
     audience: 'women',
-    title: "Women's Rose-Gold Dress Watch",
-    categoryKey: 'electronics',
-    listingMethod: 'auction',
-    condition: 'like_new',
-    attributes: { brand: 'other', model_name: 'Rose-Gold Dress' },
-    startingQar: 550,
-    incrementQar: 35,
-  },
-  {
-    audience: 'women',
-    title: "Women's Evening Dress",
-    categoryKey: 'clothing',
-    listingMethod: 'auction',
-    condition: 'like_new',
-    attributes: {},
-    startingQar: 400,
-    incrementQar: 25,
-  },
-  {
-    audience: 'women',
-    title: "Women's Leather Crossbody Handbag — 1,250 QAR",
+    title: 'Bakhoor Gift Box — 180 QAR',
     categoryKey: 'general',
     listingMethod: 'fixed_price',
-    condition: 'like_new',
-    attributes: { item_condition: 'like-new', brand_name: 'Artisan' },
-    priceQar: 1_250,
-  },
-  {
-    audience: 'women',
-    title: "Women's City Bicycle — step-through",
-    categoryKey: 'sports',
-    listingMethod: 'auction',
-    condition: 'used',
-    attributes: {},
-    startingQar: 900,
-    incrementQar: 45,
-  },
-  {
-    audience: 'women',
-    title: "Women's Block-Heel Sandals — 320 QAR",
-    categoryKey: 'clothing',
-    listingMethod: 'fixed_price',
     condition: 'new',
-    attributes: {},
-    priceQar: 320,
+    attributes: { item_condition: 'new', brand_name: 'Home Fragrance' },
+    priceQar: 180,
   },
 ];
 
@@ -315,7 +315,7 @@ async function verifyPublicShelf() {
 
   const staleTitles = allListings.filter((l) => {
     const t = (l.title?.en ?? l.title ?? '').toLowerCase();
-    return /lexus|iphone|land cruiser|toyota/i.test(t);
+    return /lexus|iphone|land cruiser|toyota|sneaker|bomber|bicycle|sandal|chronograph|evening dress/i.test(t);
   });
 
   const liveAuctions = auctionListings.filter((l) => l.liveLotReference);

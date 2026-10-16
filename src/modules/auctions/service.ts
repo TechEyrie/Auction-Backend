@@ -135,6 +135,11 @@ export function createAuctionService(deps: { db: Db; withTransaction: Tx }) {
         { returnDocument: 'after' },
       );
       if (!updated) throw conflict('Auction changed');
+      // A previous sold outcome must not keep the product out of the catalogue when a new lot opens.
+      await deps.db.collection(COLLECTIONS.listings).updateOne(
+        { listingReference: current.listingReference },
+        { $set: { availability: 'available', updatedAt: now } },
+      );
       await enqueueEvent(deps.db, {
         aggregateType: 'auction',
         aggregateId: lot,

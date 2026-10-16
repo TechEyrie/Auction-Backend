@@ -207,6 +207,39 @@ test('scheduled lot that has reached its start time is already public', async ()
   assert.equal(detail.status, 200);
 });
 
+test('reopening a sold listing clears availability so it returns to the catalogue', async () => {
+  const ref = await publishAuctionListing('Resold jacket');
+  const now = Date.now();
+  const first = await openLot(ref, new Date(now - 60_000), new Date(now + 120_000));
+  const bidAuction = await winner.get<{ auction: { version: number } }>(`/api/auctions/${first}`);
+  assert.equal(bidAuction.status, 200);
+  const bid = await winner.post(`/api/auctions/${first}/bids`, {
+    amountMinor: 10_000,
+    expectedVersion: bidAuction.body.auction.version,
+  });
+  assert.equal(bid.status, 201, JSON.stringify(bid.body));
+  const closed = await admin.post(`/api/admin/auctions/${first}/close`, {
+    reason: 'deadline reached',
+    confirm: true,
+  });
+  assert.equal(closed.status, 200, JSON.stringify(closed.body));
+  const sold = await handle.db.collection(COLLECTIONS.listings).findOne({ listingReference: ref });
+  assert.equal(sold?.availability, 'sold');
+
+  const listedWhileSold = await fetch(`${baseUrl}/api/listings?method=auction&limit=48`);
+  const soldBody = (await listedWhileSold.json()) as { listings: Array<{ listingReference: string }> };
+  assert.ok(!soldBody.listings.some((row) => row.listingReference === ref));
+
+  const second = await openLot(ref, new Date(Date.now() - 1_000), new Date(Date.now() + 180_000));
+  void second;
+  const reset = await handle.db.collection(COLLECTIONS.listings).findOne({ listingReference: ref });
+  assert.equal(reset?.availability, 'available');
+
+  const listedAgain = await fetch(`${baseUrl}/api/listings?method=auction&limit=48`);
+  const againBody = (await listedAgain.json()) as { listings: Array<{ listingReference: string }> };
+  assert.ok(againBody.listings.some((row) => row.listingReference === ref));
+});
+
 test('after the auction ends, only the high bidder can open the product', async () => {
   const ref = await publishAuctionListing('Winner-only payment jacket');
   const now = Date.now();

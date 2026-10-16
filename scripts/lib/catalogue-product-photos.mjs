@@ -1,74 +1,75 @@
 /**
- * Unsplash JPEG URLs and download helpers for men/women catalogue listing photos.
+ * Unsplash JPEG URLs and download helpers for Qatari accessories catalogue photos.
  */
 
 const UNSPLASH_SUFFIX = 'auto=format&fit=crop&w=1200&q=80';
 const USER_AGENT = 'TechEyrie-AuctionMERN-dev-script/1.0 (+local catalogue photo refresh)';
 
-/** Primary + fallback Unsplash image URLs per product theme (keyword order matters). */
+/** Primary + fallback Unsplash image URLs per product theme. */
 export const PHOTO_RULES = [
   {
-    keywords: ['chronograph'],
-    primary: `https://images.unsplash.com/photo-1523275335684-37898b6baf30?${UNSPLASH_SUFFIX}`,
-    fallback: `https://images.unsplash.com/photo-1523170335258-f5ed11844a49?${UNSPLASH_SUFFIX}`,
+    keywords: ['misbaha', 'tasbeeh', 'prayer beads'],
+    match: (t) => t.includes('misbaha') || t.includes('tasbeeh') || t.includes('prayer beads'),
+    primary: `https://images.unsplash.com/photo-1606760227091-3dd870d97f1d?${UNSPLASH_SUFFIX}`,
+    fallback: `https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?${UNSPLASH_SUFFIX}`,
   },
   {
-    keywords: ['bomber', 'jacket'],
-    match: (t) => t.includes('bomber') || (t.includes('jacket') && t.includes("men")),
-    primary: `https://images.unsplash.com/photo-1551028719-00167b16eac5?${UNSPLASH_SUFFIX}`,
-    fallback: `https://images.unsplash.com/photo-1495105787522-5334e3ffa0ef?${UNSPLASH_SUFFIX}`,
+    keywords: ['oud oil', 'attar'],
+    match: (t) => t.includes('oud oil') || t.includes('attar'),
+    primary: `https://images.unsplash.com/photo-1541643600914-78b084683601?${UNSPLASH_SUFFIX}`,
+    fallback: `https://images.unsplash.com/photo-1594035910387-fea47794261f?${UNSPLASH_SUFFIX}`,
   },
   {
-    keywords: ['mountain bike'],
-    match: (t) => t.includes('mountain') && t.includes('bike'),
-    primary: `https://images.unsplash.com/photo-1576435728678-68d0fbf94e91?${UNSPLASH_SUFFIX}`,
-    fallback: `https://images.unsplash.com/photo-1571068316344-75bc76f77890?${UNSPLASH_SUFFIX}`,
+    keywords: ['bakhoor', 'incense'],
+    match: (t) => t.includes('bakhoor') || t.includes('incense'),
+    primary: `https://images.unsplash.com/photo-1608571423902-eed4a5ad8108?${UNSPLASH_SUFFIX}`,
+    fallback: `https://images.unsplash.com/photo-1615634260167-c8cdede054de?${UNSPLASH_SUFFIX}`,
   },
   {
-    keywords: ['sneaker', 'running'],
-    match: (t) => t.includes('sneaker') || (t.includes('running') && t.includes('men')),
-    primary: `https://images.unsplash.com/photo-1542291026-7eec264c27ff?${UNSPLASH_SUFFIX}`,
-    fallback: `https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?${UNSPLASH_SUFFIX}`,
+    keywords: ['mabkhara', 'burner'],
+    match: (t) => t.includes('mabkhara') || t.includes('burner'),
+    primary: `https://images.unsplash.com/photo-1615634260167-c8cdede054de?${UNSPLASH_SUFFIX}`,
+    fallback: `https://images.unsplash.com/photo-1608571423902-eed4a5ad8108?${UNSPLASH_SUFFIX}`,
   },
   {
-    keywords: ['overcoat', 'wool'],
-    match: (t) => t.includes('overcoat') || (t.includes('wool') && t.includes('coat')),
-    primary: `https://images.unsplash.com/photo-1601925260368-ae2f83cf8b7f?${UNSPLASH_SUFFIX}`,
-    fallback: `https://images.unsplash.com/photo-1522312346375-d1a52e2b99b3?${UNSPLASH_SUFFIX}`,
+    keywords: ['cufflink', 'khanjar'],
+    match: (t) => t.includes('cufflink') || t.includes('khanjar'),
+    primary: `https://images.unsplash.com/photo-1617038260897-41a1f14a8ca0?${UNSPLASH_SUFFIX}`,
+    fallback: `https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?${UNSPLASH_SUFFIX}`,
   },
   {
-    keywords: ['dress watch', 'rose-gold'],
-    match: (t) => (t.includes('dress') && t.includes('watch')) || t.includes('rose-gold'),
-    primary: `https://images.unsplash.com/photo-1523170335258-f5ed11844a49?${UNSPLASH_SUFFIX}`,
-    fallback: `https://images.unsplash.com/photo-1603252109303-2751441dd157?${UNSPLASH_SUFFIX}`,
+    keywords: ['bisht', 'cloak'],
+    match: (t) => t.includes('bisht') || t.includes('cloak'),
+    primary: `https://images.unsplash.com/photo-1558171813-4c08810b2247?${UNSPLASH_SUFFIX}`,
+    fallback: `https://images.unsplash.com/photo-1594938298603-c8148c4dae35?${UNSPLASH_SUFFIX}`,
   },
   {
-    keywords: ['evening dress'],
-    match: (t) => t.includes('evening') && t.includes('dress'),
-    primary: `https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?${UNSPLASH_SUFFIX}`,
-    fallback: `https://images.unsplash.com/photo-1566174053879-31528523f8ae?${UNSPLASH_SUFFIX}`,
+    keywords: ['bangle', 'gold'],
+    match: (t) => t.includes('bangle') || (t.includes('gold') && t.includes('set')),
+    primary: `https://images.unsplash.com/photo-1611591437281-460bfbe1220a?${UNSPLASH_SUFFIX}`,
+    fallback: `https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?${UNSPLASH_SUFFIX}`,
   },
   {
-    keywords: ['handbag', 'crossbody'],
-    match: (t) => t.includes('handbag') || t.includes('crossbody'),
-    primary: `https://images.unsplash.com/photo-1548036328-c9fa89d128fa?${UNSPLASH_SUFFIX}`,
-    fallback: `https://images.unsplash.com/photo-1490481651871-ab68de25d43d?${UNSPLASH_SUFFIX}`,
+    keywords: ['clutch', 'embroidered'],
+    match: (t) => t.includes('clutch') || t.includes('embroidered'),
+    primary: `https://images.unsplash.com/photo-1566150905458-1bf1fc113f0d?${UNSPLASH_SUFFIX}`,
+    fallback: `https://images.unsplash.com/photo-1584917865442-de89df76afd3?${UNSPLASH_SUFFIX}`,
   },
   {
-    keywords: ['city bicycle', 'step-through'],
-    match: (t) => (t.includes('city') && t.includes('bicycle')) || t.includes('step-through'),
-    primary: `https://images.unsplash.com/photo-1571068316344-75bc76f77890?${UNSPLASH_SUFFIX}`,
-    fallback: `https://images.unsplash.com/photo-1576435728678-68d0fbf94e91?${UNSPLASH_SUFFIX}`,
+    keywords: ['perfume', 'rose oud'],
+    match: (t) => t.includes('perfume') || t.includes('rose oud'),
+    primary: `https://images.unsplash.com/photo-1594035910387-fea47794261f?${UNSPLASH_SUFFIX}`,
+    fallback: `https://images.unsplash.com/photo-1541643600914-78b084683601?${UNSPLASH_SUFFIX}`,
   },
   {
-    keywords: ['sandal', 'block-heel'],
-    match: (t) => t.includes('sandal') || t.includes('block-heel'),
-    primary: `https://images.unsplash.com/photo-1543163521-1bf539c55dd2?${UNSPLASH_SUFFIX}`,
-    fallback: `https://images.unsplash.com/photo-1460353581641-37baddab0fa2?${UNSPLASH_SUFFIX}`,
+    keywords: ['pearl', 'necklace'],
+    match: (t) => t.includes('pearl') || t.includes('necklace'),
+    primary: `https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?${UNSPLASH_SUFFIX}`,
+    fallback: `https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?${UNSPLASH_SUFFIX}`,
   },
 ];
 
-const GENERIC_FALLBACK = `https://images.unsplash.com/photo-1441986300917-64674bd600d8?${UNSPLASH_SUFFIX}`;
+const GENERIC_FALLBACK = `https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?${UNSPLASH_SUFFIX}`;
 
 /**
  * @param {string} title
@@ -156,16 +157,16 @@ export async function uploadListingJpeg(staff, apiBase, collectionKey, body) {
 
 /** Known catalogue titles from seed-men-women-catalogue.mjs */
 export const CATALOGUE_TITLES = [
-  "Men's Classic Chronograph Watch",
-  "Men's Leather Bomber Jacket",
-  "Men's Mountain Bike — 21-speed",
-  "Men's Running Sneakers — 450 QAR",
-  "Men's Wool Overcoat",
-  "Women's Rose-Gold Dress Watch",
-  "Women's Evening Dress",
-  "Women's Leather Crossbody Handbag — 1,250 QAR",
-  "Women's City Bicycle — step-through",
-  "Women's Block-Heel Sandals — 320 QAR",
+  'Amber Misbaha (Tasbeeh) — 99 beads',
+  'Qatari Oud Oil Attar Set',
+  'Silver Khanjar Cufflinks',
+  "Men's Bisht Cloak — black & gold",
+  'Brass Mabkhara (Incense Burner)',
+  'Gold-Tone Bangles Set',
+  'Embroidered Abaya Clutch',
+  'Rose Oud Perfume — 50 ml — 280 QAR',
+  'Qatari Pearl Necklace',
+  'Bakhoor Gift Box — 180 QAR',
 ];
 
 /**
