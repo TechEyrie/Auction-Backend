@@ -90,6 +90,20 @@ async function openAuction(endsInMs: number, startsInMs = -1000) {
   return { lot, version: opened.body.auction.version, status: opened.body.auction.status };
 }
 
+test('admin auction list and detail by listing reference', async () => {
+  const { lot } = await openAuction(60_000);
+  const listed = await admin.get<{ auctions: Array<{ lotReference: string; listingReference: string }> }>(
+    '/api/admin/auctions?listingReference=l_test&limit=50',
+  );
+  assert.equal(listed.status, 200);
+  assert.ok(listed.body.auctions.some((row) => row.lotReference === lot));
+  assert.ok(listed.body.auctions.every((row) => row.listingReference === 'l_test'));
+  const detail = await admin.get<{ auction: { lotReference: string; closedAt: string | null } }>(`/api/admin/auctions/${lot}`);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.auction.lotReference, lot);
+  assert.equal(detail.body.auction.closedAt, null);
+});
+
 test('F01 first, later and above-minimum bids', async () => {
   const { lot, version } = await openAuction(60_000);
   const first = await customer.post(`/api/auctions/${lot}/bids`, { amountMinor: 10000, expectedVersion: version });

@@ -355,6 +355,32 @@ export function createAuctionService(deps: { db: Db; withTransaction: Tx }) {
     },
 
     get: publicView,
+
+    async getAdmin(lot: string) {
+      const auction = await auctions().findOne({ lotReference: lot });
+      if (!auction) throw new AppError('NOT_FOUND', 'Auction not found');
+      return auction;
+    },
+
+    async listAdmin(query: { listingReference?: string; status?: AuctionStatus; page: number; limit: number }) {
+      const filter: Record<string, unknown> = {};
+      if (query.listingReference) filter.listingReference = query.listingReference;
+      if (query.status) filter.status = query.status;
+      const skip = (query.page - 1) * query.limit;
+      const coll = auctions();
+      const [items, total] = await Promise.all([
+        coll.find(filter).sort({ createdAt: -1 }).skip(skip).limit(query.limit).toArray(),
+        coll.countDocuments(filter),
+      ]);
+      const totalPages = total === 0 ? 0 : Math.ceil(total / query.limit);
+      return {
+        auctions: items.map(adminStateOf),
+        page: query.page,
+        limit: query.limit,
+        total,
+        totalPages,
+      };
+    },
   };
 }
 
@@ -392,5 +418,24 @@ export function stateOf(auction: AuctionDoc, recentBids?: PublicBidRow[]) {
     outcome: auction.outcome,
     orderReference: auction.orderReference,
     ...(recentBids ? { recentBids } : {}),
+  };
+}
+
+export function adminStateOf(auction: AuctionDoc) {
+  return {
+    lotReference: auction.lotReference,
+    listingReference: auction.listingReference,
+    status: auction.status,
+    outcome: auction.outcome,
+    bidCount: auction.bidCount,
+    startingBidMinor: auction.startingBidMinor,
+    incrementMinor: auction.incrementMinor,
+    currentAmountMinor: auction.currentAmountMinor,
+    startsAt: auction.startsAt.toISOString(),
+    endsAt: auction.endsAt.toISOString(),
+    closedAt: auction.closedAt?.toISOString() ?? null,
+    winningUserReference: auction.winningUserReference,
+    orderReference: auction.orderReference,
+    version: auction.version,
   };
 }

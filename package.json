@@ -17,7 +17,8 @@
     "listings:backfill-audience": "node --env-file-if-exists=.env scripts/backfill-listing-audience.ts --target=development",
     "indexes": "node --env-file-if-exists=.env scripts/ensure-indexes.ts",
     "admin:bootstrap": "node --env-file-if-exists=.env scripts/bootstrap-admin.ts",
-    "browser:check": "node scripts/browser-check.mjs"
+    "browser:check": "node scripts/browser-check.mjs",
+    "seed:men-women-catalogue": "node --env-file-if-exists=.env scripts/seed-men-women-catalogue.mjs"
   },
   "dependencies": {
     "express": "^5.3.0",

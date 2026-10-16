@@ -4,7 +4,14 @@ import type { Db, ClientSession } from 'mongodb';
 import type { AppConfig } from '../../config/index.ts';
 import { requireActiveUser, requireAuth, requireCapability } from '../auth/middleware.ts';
 import { parseInput } from '../../shared/validate.ts';
-import { createAuctionService, stateOf } from './service.ts';
+import { createAuctionService, adminStateOf, stateOf } from './service.ts';
+
+const adminListSchema = z.object({
+  listingReference: z.string().max(80).optional(),
+  status: z.enum(['draft', 'scheduled', 'live', 'closed', 'cancelled']).optional(),
+  page: z.coerce.number().int().min(1).max(1000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
 
 const createSchema = z.object({
   listingReference: z.string().min(1).max(80),
@@ -83,19 +90,33 @@ export function adminAuctionRouter(deps: {
 }): Router {
   const router = Router();
   const auctions = createAuctionService(deps);
+
+  router.get('/', requireAuth(), requireActiveUser(), requireCapability('auctions.manage'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const query = parseInput(adminListSchema, req.query);
+      res.json(await auctions.listAdmin(query));
+    } catch (err) { next(err); }
+  });
+
   router.post('/', requireAuth(), requireActiveUser(), requireCapability('auctions.manage'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const body = parseInput(createSchema, req.body);
       const user = req.auth!.user;
       const auction = await auctions.create(body, user.publicReference);
-      res.status(201).json({ auction: stateOf(auction) });
+      res.status(201).json({ auction: adminStateOf(auction) });
+    } catch (err) { next(err); }
+  });
+
+  router.get('/:lot', requireAuth(), requireActiveUser(), requireCapability('auctions.manage'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json({ auction: adminStateOf(await auctions.getAdmin(String(req.params.lot))) });
     } catch (err) { next(err); }
   });
 
   router.post('/:lot/open', requireAuth(), requireActiveUser(), requireCapability('auctions.manage'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const user = req.auth!.user;
-      res.json({ auction: stateOf(await auctions.open(String(req.params.lot), user.publicReference)) });
+      res.json({ auction: adminStateOf(await auctions.open(String(req.params.lot), user.publicReference)) });
     } catch (err) { next(err); }
   });
 
@@ -103,7 +124,7 @@ export function adminAuctionRouter(deps: {
     try {
       const body = parseInput(closeSchema, req.body);
       const user = req.auth!.user;
-      res.json({ auction: stateOf(await auctions.closeOne(String(req.params.lot), user.publicReference, body.reason)) });
+      res.json({ auction: adminStateOf(await auctions.closeOne(String(req.params.lot), user.publicReference, body.reason)) });
     } catch (err) { next(err); }
   });
 
