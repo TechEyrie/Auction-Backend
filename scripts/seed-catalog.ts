@@ -18,7 +18,7 @@ import type { ListingMethod } from '../src/modules/taxonomy/models.ts';
  *    `docs/OPEN_QUESTIONS.md`). The seed therefore grants the classifieds methods only;
  *    an admin can widen a category in the taxonomy screen once that decision is made.
  */
-const METHODS: ListingMethod[] = ['fixed_price', 'enquiry'];
+const METHODS: ListingMethod[] = ['auction', 'fixed_price', 'enquiry'];
 
 const ACTOR = { reference: 'system:seed', requestId: 'seed' } as const;
 

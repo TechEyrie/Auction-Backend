@@ -1,7 +1,13 @@
-/** QAR minor units. 100 dirhams = 10_000. Threshold QAR 2,000 = 200_000. */
-const THRESHOLD_MINOR = 200_000;
-const FLAT_FEE_MINOR = 10_000;
-export const COMMISSION_VERSION = '2026-10-15';
+/**
+ * Platform revenue snapshot stored on every order.
+ *
+ * Interim owner policy (no public seller self-service / no seller payouts yet):
+ * the platform retains 100% of the customer-paid winning price. Seller net is
+ * always zero and blocked so settlement tooling cannot invent a payable.
+ *
+ * Field names stay for stored order documents; do not surface seller-net UX.
+ */
+export const COMMISSION_VERSION = '2026-10-16-platform-100';
 
 export type CommissionSnapshot = {
   policyVersion: string;
@@ -11,28 +17,13 @@ export type CommissionSnapshot = {
   sellerNetStatus: 'ready' | 'blocked';
 };
 
-/**
- * Below QAR 2,000: QAR 100. Above: 5%, half-up to the minor unit.
- * Exactly QAR 2,000 is unresolved: no seller net is invented.
- */
+/** Customer-paid amount is platform revenue. No seller split. */
 export function commissionOf(amountMinor: number): CommissionSnapshot {
-  if (amountMinor === THRESHOLD_MINOR) {
-    return {
-      policyVersion: COMMISSION_VERSION,
-      commissionStatus: 'unresolved',
-      commissionAmountMinor: null,
-      sellerNetAmountMinor: null,
-      sellerNetStatus: 'blocked',
-    };
-  }
-  const commissionAmountMinor = amountMinor < THRESHOLD_MINOR
-    ? FLAT_FEE_MINOR
-    : Math.round((amountMinor * 5) / 100);
   return {
     policyVersion: COMMISSION_VERSION,
     commissionStatus: 'calculated',
-    commissionAmountMinor,
-    sellerNetAmountMinor: amountMinor - commissionAmountMinor,
-    sellerNetStatus: 'ready',
+    commissionAmountMinor: amountMinor,
+    sellerNetAmountMinor: 0,
+    sellerNetStatus: 'blocked',
   };
 }

@@ -386,8 +386,9 @@ test('H01-H12 sold order, winner payment, and commission', async () => {
   const exactOrder = await other.get(`/api/orders/ord_${exact.lot}`);
   assert.equal(JSON.stringify(exactOrder.body).includes('sellerNet'), false);
   const storedExact = await handle.db.collection(COLLECTIONS.orders).findOne({ orderReference: `ord_${exact.lot}` });
-  assert.equal(storedExact?.sellerNetAmountMinor, null);
+  assert.equal(storedExact?.sellerNetAmountMinor, 0);
   assert.equal(storedExact?.sellerNetStatus, 'blocked');
+  assert.equal(storedExact?.commissionAmountMinor, 200_000);
 
   const payable = await openAuction(60_000);
   await customer.post(`/api/auctions/${payable.lot}/bids`, { amountMinor: 10000, expectedVersion: payable.version });
@@ -413,46 +414,63 @@ test('H01-H12 sold order, winner payment, and commission', async () => {
   assert.equal(JSON.stringify(stored).includes('card'), false);
 });
 
-test('I01-I12 finance summary and manual settlement', async () => {
+test('I01-I12 finance summary is platform revenue; seller settlements disabled', async () => {
   const denied = await customer.get('/api/admin/finance/summary');
   assert.equal(denied.status, 403);
-  const summary = await admin.get<{ definitions: { collectedRevenueMinor: string }; collectedRevenueMinor: number; unpaidWins: number }>('/api/admin/finance/summary');
+  const summary = await admin.get<{
+    definitions: { collectedRevenueMinor: string };
+    collectedRevenueMinor: number;
+    unpaidWins: number;
+    unsettledPayableMinor: number;
+  }>('/api/admin/finance/summary');
   assert.equal(summary.status, 200);
-  assert.match(summary.body.definitions.collectedRevenueMinor, /Unpaid/);
+  assert.match(summary.body.definitions.collectedRevenueMinor, /platform revenue/i);
+  assert.equal(summary.body.unsettledPayableMinor, 0);
   const before = summary.body.collectedRevenueMinor;
 
   const live = await openAuction(60_000);
   await customer.post(`/api/auctions/${live.lot}/bids`, { amountMinor: 15000, expectedVersion: live.version });
   await admin.post(`/api/admin/auctions/${live.lot}/close`, { reason: 'deadline', confirm: true });
   const orderReference = `ord_${live.lot}`;
-  const unpaid = await admin.post('/api/admin/finance/settlements', { orderReference, reason: 'too early', confirm: true, amountMinor: 1 });
-  assert.equal(unpaid.status, 409);
+  const unpaidSettle = await admin.post('/api/admin/finance/settlements', {
+    orderReference,
+    reason: 'seller payout attempt',
+    confirm: true,
+    amountMinor: 1,
+  });
+  assert.equal(unpaidSettle.status, 403);
   await customer.post('/api/payments/complete', { orderReference, amountMinor: 1 });
-  const [first, second] = await Promise.all([
-    admin.post('/api/admin/finance/settlements', { orderReference, reason: 'bank transfer recorded', confirm: true, amountMinor: 999 }),
-    admin.post('/api/admin/finance/settlements', { orderReference, reason: 'bank transfer recorded', confirm: true }),
-  ]);
-  assert.equal([first.status, second.status].filter((status) => status === 201).length, 1);
-  assert.equal(await handle.db.collection(COLLECTIONS.financialEntries).countDocuments({ eventId: `settle:${orderReference}` }), 1);
-  const again = await admin.post('/api/admin/finance/settlements', { orderReference, reason: 'again', confirm: true });
-  assert.equal(again.status, 409);
-  const reversed = await admin.post('/api/admin/finance/settlements/reverse', { orderReference, reason: 'wrong seller account', confirm: true });
-  assert.equal(reversed.status, 200);
-  const page = await admin.get<{ total: number; orders: unknown[] }>(`/api/admin/finance/orders?paymentState=paid&q=${orderReference}&page=1&limit=5`);
+  const settled = await admin.post('/api/admin/finance/settlements', {
+    orderReference,
+    reason: 'seller payout attempt',
+    confirm: true,
+  });
+  assert.equal(settled.status, 403);
+  const reversed = await admin.post('/api/admin/finance/settlements/reverse', {
+    orderReference,
+    reason: 'reverse attempt',
+    confirm: true,
+  });
+  assert.equal(reversed.status, 403);
+  assert.equal(await handle.db.collection(COLLECTIONS.financialEntries).countDocuments({ eventId: `settle:${orderReference}` }), 0);
+
+  const page = await admin.get<{
+    total: number;
+    orders: Array<{ amountPaidMinor: number; sourceLabel: string; listingTitle: string }>;
+  }>(`/api/admin/finance/orders?paymentState=paid&q=${orderReference}&page=1&limit=5`);
   assert.equal(page.status, 200);
   assert.equal(page.body.total, 1);
+  assert.equal(page.body.orders[0]?.amountPaidMinor, 15000);
+  assert.equal(JSON.stringify(page.body).includes('sellerNet'), false);
+  assert.equal(JSON.stringify(page.body).includes('settlement'), false);
+
   const exported = await admin.get<string>('/api/admin/finance/export');
   assert.equal(exported.status, 200);
+  assert.equal(String(exported.body).includes('sellerNet'), false);
   assert.equal(String(exported.body).includes('=cmd'), false);
-  const after = await admin.get<{ collectedRevenueMinor: number; unpaidWins: number }>('/api/admin/finance/summary');
+  const after = await admin.get<{ collectedRevenueMinor: number; unsettledPayableMinor: number }>('/api/admin/finance/summary');
   assert.ok(after.body.collectedRevenueMinor >= before + 15000);
-  const blocked = await openAuction(60_000);
-  await handle.db.collection(COLLECTIONS.auctions).updateOne({ lotReference: blocked.lot }, { $set: { startingBidMinor: 200_000 } });
-  await other.post(`/api/auctions/${blocked.lot}/bids`, { amountMinor: 200_000, expectedVersion: blocked.version });
-  await admin.post(`/api/admin/auctions/${blocked.lot}/close`, { reason: 'deadline', confirm: true });
-  await other.post('/api/payments/complete', { orderReference: `ord_${blocked.lot}` });
-  const refused = await admin.post('/api/admin/finance/settlements', { orderReference: `ord_${blocked.lot}`, reason: 'unresolved commission', confirm: true });
-  assert.equal(refused.status, 409);
+  assert.equal(after.body.unsettledPayableMinor, 0);
 });
 
 test('J01-J12 account, enquiry, and published terms', async () => {

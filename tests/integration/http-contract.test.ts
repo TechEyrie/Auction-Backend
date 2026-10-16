@@ -84,8 +84,11 @@ test('session bootstrap issues the CSRF cookie and reports an anonymous session'
   const csrfCookie = setCookies.find((c) => c.startsWith('csrf='));
   assert.ok(csrfCookie, 'csrf cookie missing');
   assert.ok(!/HttpOnly/i.test(csrfCookie), 'the CSRF cookie must stay readable for double-submit');
+  // This suite uses http:// CORS origins → SameSite=Lax. Cross-origin https deploys use None
+  // (covered by config unit tests + the dedicated cross-origin cookie contract below).
   assert.match(csrfCookie, /SameSite=Lax/);
   assert.match(csrfCookie, /Secure/, 'production cookie must be Secure');
+  assert.ok(!/Partitioned/i.test(csrfCookie));
 });
 
 test('CORS echoes the configured origin with credentials, and only that origin', async () => {

@@ -22,6 +22,14 @@ export type AppConfig = {
   keepSignedInMs: number;
   cookieSecure: boolean;
   cookieDomain: string | undefined;
+  /**
+   * Cookie SameSite. `None` is required when the browser origin and API host are
+   * different sites (e.g. Vercel frontend → Render API); `Lax` is correct for
+   * same-site deploys and local http.
+   */
+  cookieSameSite: 'Lax' | 'None' | 'Strict';
+  /** CHIPS: set with SameSite=None so Chrome still stores the third-party cookie. */
+  cookiePartitioned: boolean;
   /** Base64 32-byte key for encrypting MFA secrets at rest. Null = MFA disabled. */
   mfaEncryptionKey: string | null;
   /** One-time token required to bootstrap the first super admin. Null = bootstrap disabled. */
@@ -66,6 +74,10 @@ const schema = z.object({
   SESSION_KEEP_SIGNED_IN_DAYS: z.coerce.number().int().positive().default(30),
   COOKIE_SECURE: z.enum(['true', 'false']).optional(),
   COOKIE_DOMAIN: z.string().optional(),
+  /** lax | none | strict. Unset = auto (see resolveCookieSameSite). */
+  COOKIE_SAME_SITE: z.enum(['lax', 'none', 'strict', 'Lax', 'None', 'Strict']).optional(),
+  /** Override Partitioned; default true when SameSite=None. */
+  COOKIE_PARTITIONED: z.enum(['true', 'false']).optional(),
   MFA_ENCRYPTION_KEY: z.string().optional(),
   ADMIN_BOOTSTRAP_TOKEN: z.string().optional(),
   PAYMENT_PROVIDER: z.string().optional(),
@@ -93,6 +105,27 @@ function parseTrustProxy(raw: string): boolean | number {
   if (v === 'false' || v === '') return false;
   const n = Number.parseInt(v, 10);
   return Number.isNaN(n) ? false : n;
+}
+
+/**
+ * Cross-site SPA+API (HTTPS frontend origin, API on another host) cannot send
+ * SameSite=Lax cookies on credentialed fetch — register/login then fail CSRF
+ * double-submit. Default to None when Secure cookies are on and any allowed
+ * origin is https. Same-site production should set COOKIE_SAME_SITE=lax.
+ */
+export function resolveCookieSameSite(input: {
+  explicit?: string | undefined;
+  cookieSecure: boolean;
+  corsOrigins: readonly string[];
+}): 'Lax' | 'None' | 'Strict' {
+  const raw = input.explicit?.trim().toLowerCase();
+  if (raw === 'lax') return 'Lax';
+  if (raw === 'none') return 'None';
+  if (raw === 'strict') return 'Strict';
+  if (input.cookieSecure && input.corsOrigins.some((o) => o.startsWith('https://'))) {
+    return 'None';
+  }
+  return 'Lax';
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
@@ -138,6 +171,25 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     issues.push('MFA_ENCRYPTION_KEY: must be 32 bytes, base64-encoded');
   }
 
+  const cookieSecure = data?.COOKIE_SECURE
+    ? data.COOKIE_SECURE === 'true'
+    : nodeEnv === 'production';
+  const cookieSameSite = resolveCookieSameSite({
+    explicit: data?.COOKIE_SAME_SITE,
+    cookieSecure,
+    corsOrigins,
+  });
+  if (cookieSameSite === 'None' && !cookieSecure) {
+    issues.push('COOKIE_SAME_SITE=none requires COOKIE_SECURE=true (browsers reject SameSite=None without Secure)');
+  }
+  const cookiePartitioned =
+    data?.COOKIE_PARTITIONED !== undefined
+      ? data.COOKIE_PARTITIONED === 'true'
+      : cookieSameSite === 'None';
+  if (cookiePartitioned && !cookieSecure) {
+    issues.push('COOKIE_PARTITIONED=true requires COOKIE_SECURE=true');
+  }
+
   if (!data || issues.length > 0) {
     throw new ConfigurationError(issues.length > 0 ? issues : ['unknown configuration error']);
   }
@@ -158,8 +210,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     sessionIdleMs: data.SESSION_IDLE_MINUTES * 60_000,
     sessionAbsoluteMs: data.SESSION_ABSOLUTE_HOURS * 3_600_000,
     keepSignedInMs: data.SESSION_KEEP_SIGNED_IN_DAYS * 86_400_000,
-    cookieSecure: data.COOKIE_SECURE ? data.COOKIE_SECURE === 'true' : nodeEnv === 'production',
+    cookieSecure,
     cookieDomain: data.COOKIE_DOMAIN?.trim() || undefined,
+    cookieSameSite,
+    cookiePartitioned,
     mfaEncryptionKey: mfaKey || null,
     adminBootstrapToken: (data.ADMIN_BOOTSTRAP_TOKEN ?? '').trim() || null,
     legalTermsVersion: (data.LEGAL_TERMS_VERSION ?? '').trim() || null,

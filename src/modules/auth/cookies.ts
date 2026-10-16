@@ -32,6 +32,7 @@ type CookieOptions = {
   path: string;
   maxAgeMs?: number;
   domain?: string | undefined;
+  partitioned?: boolean;
 };
 
 function serialize(name: string, value: string, opts: CookieOptions): string {
@@ -40,22 +41,28 @@ function serialize(name: string, value: string, opts: CookieOptions): string {
   if (opts.secure) parts.push('Secure');
   if (opts.domain) parts.push(`Domain=${opts.domain}`);
   if (opts.maxAgeMs !== undefined) parts.push(`Max-Age=${Math.floor(opts.maxAgeMs / 1000)}`);
+  // CHIPS: required for Chrome to keep third-party cookies when frontend and API are different sites.
+  if (opts.partitioned) parts.push('Partitioned');
   return parts.join('; ');
 }
 
 function baseOptions(config: AppConfig): Omit<CookieOptions, 'httpOnly' | 'maxAgeMs'> {
   return {
     secure: config.cookieSecure,
-    sameSite: 'Lax',
+    sameSite: config.cookieSameSite,
     path: '/',
     domain: config.cookieDomain,
+    partitioned: config.cookiePartitioned,
   };
 }
 
 /**
- * Session cookie: HttpOnly, Secure in production, SameSite=Lax, path-scoped to /.
+ * Session cookie: HttpOnly, Secure in production, SameSite from config, path-scoped to /.
  * A `maxAgeMs` is only set for explicit keep-me-signed-in; otherwise it is a
  * browser-session cookie with a shorter server-side absolute expiry.
+ *
+ * Cross-origin deploys (Vercel → API host) must use SameSite=None; Secure so the
+ * browser sends `sid` on credentialed fetch. Same-site deploys keep Lax.
  */
 export function setSessionCookie(res: Response, config: AppConfig, token: string, maxAgeMs?: number): void {
   res.append(
