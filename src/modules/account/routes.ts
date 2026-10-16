@@ -26,8 +26,31 @@ export function accountRouter(deps: { db: Db }): Router {
         deps.db.collection(COLLECTIONS.bids).find({ userReference: ref }).sort({ acceptedAt: -1 }).limit(50)
           .project({ amountMinor: 1, lotReference: 1, sequence: 1, acceptedAt: 1, _id: 0 }).toArray(),
         deps.db.collection(COLLECTIONS.orders).find({ winnerUserReference: ref }).sort({ createdAt: -1 }).limit(50)
-          .project({ orderReference: 1, lotReference: 1, listingReference: 1, winningPriceMinor: 1, paymentState: 1, currency: 1, createdAt: 1, _id: 0 }).toArray(),
+          .project({
+            orderReference: 1,
+            source: 1,
+            lotReference: 1,
+            listingReference: 1,
+            winningPriceMinor: 1,
+            paymentState: 1,
+            currency: 1,
+            createdAt: 1,
+            _id: 0,
+          }).toArray(),
       ]);
+      const listingRefs = [...new Set(orders.map((order) => String(order.listingReference ?? '')).filter(Boolean))];
+      const listings = listingRefs.length
+        ? await deps.db.collection(COLLECTIONS.listings)
+          .find({ listingReference: { $in: listingRefs } })
+          .project({ listingReference: 1, title: 1, _id: 0 })
+          .toArray()
+        : [];
+      const titleByRef = new Map(
+        listings.map((listing) => {
+          const title = listing.title as { en?: string; ar?: string } | undefined;
+          return [String(listing.listingReference), title?.en?.trim() || title?.ar?.trim() || 'Purchased item'] as const;
+        }),
+      );
       res.json({
         profile: toUserDto(req.auth!.user),
         bids: bids.map((bid) => ({
@@ -38,8 +61,10 @@ export function accountRouter(deps: { db: Db }): Router {
         })),
         orders: orders.map((order) => ({
           orderReference: order.orderReference,
+          source: order.source === 'fixed_price' ? 'fixed_price' : 'auction',
           lotReference: order.lotReference,
           listingReference: order.listingReference,
+          listingTitle: titleByRef.get(String(order.listingReference)) ?? 'Purchased item',
           winningPriceMinor: order.winningPriceMinor,
           paymentState: order.paymentState,
           currency: order.currency,

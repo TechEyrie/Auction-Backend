@@ -101,7 +101,13 @@ export function orderRouter(deps: { db: Db }): Router {
     res.setHeader('Cache-Control', 'private, no-store');
     try {
       const order = await readOrderForWinner(deps.db, String(req.params.orderReference), req.auth!.user.publicReference);
-      res.json({ order });
+      const listing = await deps.db.collection(COLLECTIONS.listings).findOne(
+        { listingReference: order.listingReference },
+        { projection: { title: 1 } },
+      );
+      const title = listing?.title as { en?: string; ar?: string } | undefined;
+      const listingTitle = title?.en?.trim() || title?.ar?.trim() || 'Your purchase';
+      res.json({ order: { ...order, listingTitle } });
     } catch (err) { next(err); }
   });
   router.patch('/:orderReference/fulfillment', requireAuth(), requireActiveUser(), async (req, res, next) => {
