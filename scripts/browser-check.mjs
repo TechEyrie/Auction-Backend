@@ -195,7 +195,7 @@ async function main() {
     password: SUPER_PW,
   });
   if (adminLogin.status !== 200) throw new Error(`admin login failed: ${JSON.stringify(adminLogin.body)}`);
-  const enroll = await adminClient.post('/api/auth/mfa/enroll', { currentPassword: SUPER_PW }, { origin: frontendOrigin });
+  const enroll = await adminClient.post('/api/auth/mfa/enroll', {}, { origin: frontendOrigin });
   const secret = enroll.body.secret;
   await adminClient.post('/api/auth/mfa/enroll/confirm', { code: generateTotp(secret) }, { origin: frontendOrigin });
 

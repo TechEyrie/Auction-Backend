@@ -9,6 +9,7 @@ import { TestClient } from '../helpers/client.ts';
 import { createAuthService } from '../../src/modules/auth/service.ts';
 import { bootstrapSuperAdmin } from '../../src/modules/admin/bootstrap.ts';
 import { generateTotp } from '../../src/shared/totp.ts';
+import { satisfyCustomerMfa } from '../helpers/authFixture.ts';
 import { io, type Socket } from 'socket.io-client';
 import { signPaymentBody } from '../../src/modules/orders/service.ts';
 
@@ -45,7 +46,7 @@ before(async () => {
   await admin.bootstrap();
   const login = await admin.post('/api/auth/login', { identifier: '55557000', password: 'auction admin pw 1' });
   if (login.status !== 200) throw new Error(`admin login failed: ${JSON.stringify(login.body)}`);
-  const enroll = await admin.post('/api/auth/mfa/enroll', { currentPassword: 'auction admin pw 1' });
+  const enroll = await admin.post('/api/auth/mfa/enroll', {});
   if (enroll.status !== 200) throw new Error(`admin enroll failed: ${JSON.stringify(enroll.body)}`);
   const confirm = await admin.post('/api/auth/mfa/enroll/confirm', { code: generateTotp((enroll.body as { secret: string }).secret) });
   if (confirm.status !== 200) throw new Error(`admin confirm failed: ${JSON.stringify(confirm.body)}`);
@@ -60,6 +61,8 @@ before(async () => {
   const c1 = await customer.post('/api/auth/login', { identifier: '55557001', password: 'auction customer pw 1' });
   const c2 = await other.post('/api/auth/login', { identifier: '55557002', password: 'auction customer pw 2' });
   if (c1.status !== 200 || c2.status !== 200) throw new Error('customer login failed');
+  await satisfyCustomerMfa(customer);
+  await satisfyCustomerMfa(other);
 });
 
 after(async () => {

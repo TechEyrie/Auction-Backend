@@ -43,7 +43,7 @@ export const CONDITIONS = ['new', 'like_new', 'used', 'refurbished', 'not_applic
 export type Condition = (typeof CONDITIONS)[number];
 
 /** Primary shopper segment for discovery (not a category duplicate). */
-export const AUDIENCES = ['men', 'women'] as const;
+export const AUDIENCES = ['men', 'women', 'unisex'] as const;
 export type Audience = (typeof AUDIENCES)[number];
 
 export type LocalizedText = { en: string | null; ar: string | null };

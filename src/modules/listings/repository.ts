@@ -1,6 +1,7 @@
 import type { Collection, Db } from 'mongodb';
 import { COLLECTIONS } from '../../db/indexes.ts';
 import { escapeRegex } from '../sellers/repository.ts';
+import { SUSPENDED_CATEGORY_ROOTS } from '../taxonomy/models.ts';
 import type { Audience, Condition, ListingDoc, ListingMethod, ListingWithId } from './models.ts';
 
 export type Paged<T> = { items: T[]; page: number; limit: number; total: number; totalPages: number };
@@ -70,6 +71,10 @@ export type PublicListQuery = {
   limit: number;
   /** When set, auction listings without a live lot are excluded from discovery. */
   liveAuctionListingReferences?: string[];
+  /** Live auctions ending within this many hours (handled in service, not buildPublicFilter). */
+  endingSoonHours?: number;
+  /** Restrict to these references (exact $in); order is applied in service when needed. */
+  listingReferences?: string[];
 };
 
 /** Only visible, published listings are ever returned by a public query. */
@@ -90,7 +95,9 @@ export function buildPublicFilter(query: PublicListQuery): Record<string, unknow
   };
   if (query.categoryKeys && query.categoryKeys.length > 0) {
     // The path snapshot contains the category itself, so descendants match their parent key too.
-    filter.categoryPath = { $in: query.categoryKeys };
+    filter.categoryPath = { $in: query.categoryKeys, $nin: [...SUSPENDED_CATEGORY_ROOTS] };
+  } else {
+    filter.categoryPath = { $nin: [...SUSPENDED_CATEGORY_ROOTS] };
   }
   if (query.method) filter.listingMethod = query.method;
   if (query.condition) filter.condition = query.condition;
@@ -98,6 +105,9 @@ export function buildPublicFilter(query: PublicListQuery): Record<string, unknow
   if (query.cityKey) filter['location.cityKey'] = query.cityKey;
   if (query.featuredOnly) filter['featured.featured'] = true;
   if (query.audience) filter.audience = query.audience;
+  if (query.listingReferences && query.listingReferences.length > 0) {
+    filter.listingReference = { $in: query.listingReferences };
+  }
   if (query.search) {
     const rx = new RegExp(escapeRegex(query.search), 'i');
     filter.$or = [{ 'title.en': rx }, { 'title.ar': rx }, { 'description.en': rx }, { 'description.ar': rx }, { listingReference: rx }];

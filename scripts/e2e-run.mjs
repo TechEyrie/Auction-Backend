@@ -80,6 +80,17 @@ async function staffLogin() {
   return c;
 }
 
+const CUSTOMER_PASSWORD = 'BuyerPass12';
+
+async function enrollCustomerMfa(c) {
+  const enroll = await c.post('/api/auth/mfa/enroll', {});
+  if (enroll.status !== 200) throw new Error(`customer enroll ${enroll.status} ${JSON.stringify(enroll.body)}`);
+  const secret = enroll.body.secret;
+  const confirm = await c.post('/api/auth/mfa/enroll/confirm', { code: generateTotp(secret) });
+  if (confirm.status !== 200) throw new Error(`customer confirm ${confirm.status} ${JSON.stringify(confirm.body)}`);
+  return secret;
+}
+
 async function registerCustomer(label) {
   const c = new Client();
   await c.get('/api/auth/session');
@@ -87,10 +98,11 @@ async function registerCustomer(label) {
   const reg = await c.post('/api/auth/register', {
     fullName: `E2E ${label}`,
     email,
-    password: 'BuyerPass12',
+    password: CUSTOMER_PASSWORD,
     termsAccepted: true,
   });
   if (reg.status !== 201) throw new Error(`register ${label} ${reg.status} ${JSON.stringify(reg.body)}`);
+  await enrollCustomerMfa(c);
   return { client: c, email };
 }
 

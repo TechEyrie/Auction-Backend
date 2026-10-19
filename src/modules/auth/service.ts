@@ -9,7 +9,7 @@ import { normalizeEmail, normalizePhoneE164 } from '../../shared/normalize.ts';
 import { generateTotpSecret, verifyTotp, TOTP_STEP_SECONDS } from '../../shared/totp.ts';
 import { recordAudit } from '../audit/repository.ts';
 import { toUserDto, type UserDto } from './dto.ts';
-import { capabilitiesFor } from './roles.ts';
+import { capabilitiesFor, isStaff } from './roles.ts';
 import * as repo from './repository.ts';
 import type { AuthContext, SessionDoc, UserDoc, UserWithId } from './models.ts';
 
@@ -29,9 +29,10 @@ function currentStep(atMs = Date.now()): number {
   return Math.floor(atMs / 1000 / TOTP_STEP_SECONDS);
 }
 
-/** TEMP: MFA disabled pending re-enable; shared by middleware/session/realtime. */
-export function requiresMfa(_user: UserDoc): boolean {
-  return false;
+/** Customers must satisfy TOTP MFA; staff enforcement is deferred. */
+export function requiresMfa(user: UserDoc): boolean {
+  if (isStaff(user.roles)) return false; // TEMP: staff MFA later
+  return true;
 }
 
 function assertPasswordPolicy(
@@ -247,13 +248,35 @@ export function createAuthService(deps: AuthDeps) {
     await repo.revokeAllUserSessions(db, challenge.userId, 'password_reset');
   }
 
-  async function startMfaEnrollment(user: UserWithId, currentPassword: string, keyBase64: string) {
-    if (!(await verifyPassword(currentPassword, user.passwordHash))) {
-      throw new AppError('FORBIDDEN', 'Reauthentication failed');
+  async function startMfaEnrollment(user: UserWithId, keyBase64: string, code?: string) {
+    let mfaState = user.mfa;
+    if (mfaState.enabled) {
+      if (!code) {
+        throw new AppError('CONFLICT', 'MFA is already enabled');
+      }
+      let verified = false;
+      if (mfaState.secretEnc) {
+        const existingSecret = decryptSecret(mfaState.secretEnc, keyBase64);
+        if (verifyTotp(existingSecret, String(code))) verified = true;
+      }
+      if (!verified) {
+        const hash = recoveryCodeHash(String(code));
+        const index = mfaState.recoveryCodes.findIndex((c) => c.usedAt === null && safeEqualHex(c.hash, hash));
+        if (index >= 0) {
+          mfaState = {
+            ...mfaState,
+            recoveryCodes: mfaState.recoveryCodes.map((c, i) => (i === index ? { ...c, usedAt: new Date() } : c)),
+          };
+          verified = true;
+        }
+      }
+      if (!verified) {
+        throw new AppError('VALIDATION_ERROR', 'That code is not valid', { fieldErrors: { code: 'invalid' } });
+      }
     }
     const secret = generateTotpSecret();
     await repo.updateUserMfa(db, user._id, {
-      ...user.mfa,
+      ...mfaState,
       enabled: false,
       secretEnc: encryptSecret(secret, keyBase64),
       confirmedAt: null,

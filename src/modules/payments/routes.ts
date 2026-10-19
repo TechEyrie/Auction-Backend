@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { AppConfig } from '../../config/index.ts';
 import { AppError } from '../../shared/errors.ts';
 import { parseInput } from '../../shared/validate.ts';
-import { requireActiveUser, requireAuth, requireCapability } from '../auth/middleware.ts';
+import { requireActiveUser, requireAuth, requireCapability, requireMfa } from '../auth/middleware.ts';
 import { COLLECTIONS } from '../../db/indexes.ts';
 import {
   applyVerifiedPayment,
@@ -28,7 +28,7 @@ const webhookSchema = z.object({
 export function paymentRouter(deps: { db: Db; config: AppConfig }): Router {
   const router = Router();
 
-  router.post('/complete', requireAuth(), requireActiveUser(), async (req, res, next) => {
+  router.post('/complete', requireAuth(), requireActiveUser(), requireMfa(), async (req, res, next) => {
     try {
       if (deps.config.isProduction) {
         throw new AppError('FORBIDDEN', 'The manual payment placeholder is rejected in production');
@@ -97,7 +97,7 @@ const fulfillmentSchema = z.object({
 
 export function orderRouter(deps: { db: Db }): Router {
   const router = Router();
-  router.get('/:orderReference', requireAuth(), requireActiveUser(), async (req, res, next) => {
+  router.get('/:orderReference', requireAuth(), requireActiveUser(), requireMfa(), async (req, res, next) => {
     res.setHeader('Cache-Control', 'private, no-store');
     try {
       const order = await readOrderForWinner(deps.db, String(req.params.orderReference), req.auth!.user.publicReference);
@@ -110,7 +110,7 @@ export function orderRouter(deps: { db: Db }): Router {
       res.json({ order: { ...order, listingTitle } });
     } catch (err) { next(err); }
   });
-  router.patch('/:orderReference/fulfillment', requireAuth(), requireActiveUser(), async (req, res, next) => {
+  router.patch('/:orderReference/fulfillment', requireAuth(), requireActiveUser(), requireMfa(), async (req, res, next) => {
     res.setHeader('Cache-Control', 'private, no-store');
     try {
       const body = parseInput(fulfillmentSchema, req.body ?? {});

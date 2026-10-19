@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Db } from 'mongodb';
 import { AppError } from '../../shared/errors.ts';
 import { toAdminUserDto, toUserDto } from '../auth/dto.ts';
-import { requireAuth, requireOwnership } from '../auth/middleware.ts';
+import { requireAuth, requireMfa, requireOwnership } from '../auth/middleware.ts';
 import { capabilitiesFor } from '../auth/roles.ts';
 import * as repo from '../auth/repository.ts';
 
@@ -16,6 +16,7 @@ export function usersRouter(deps: { db: Db }): Router {
   router.get(
     '/:ref',
     requireAuth(),
+    requireMfa(),
     requireOwnership((req) => (typeof req.params.ref === 'string' ? req.params.ref : null)),
     async (req, res, next) => {
       try {

@@ -7,6 +7,7 @@ import { loadConfig } from '../../src/config/index.ts';
 import { COLLECTIONS, ensureIndexes } from '../../src/db/indexes.ts';
 import { silentLogger } from '../helpers/context.ts';
 import { seedCatalog, CATEGORY_SEED, SCHEMA_SEED, LOCATION_SEED } from '../../scripts/seed-catalog.ts';
+import { isSuspendedCategory } from '../../src/modules/taxonomy/models.ts';
 import { createTaxonomyService } from '../../src/modules/taxonomy/service.ts';
 import { createAttributeService } from '../../src/modules/attributes/service.ts';
 import { createLocationService } from '../../src/modules/locations/service.ts';
@@ -21,6 +22,15 @@ let replSet: MongoMemoryReplSet;
 let handle: DbHandle;
 
 const CATEGORY_COUNT = CATEGORY_SEED.reduce((total, root) => total + 1 + (root.children?.length ?? 0), 0);
+
+const VISIBLE_CATEGORY_COUNT = CATEGORY_SEED.reduce((total, root) => {
+  let n = isSuspendedCategory(root.key, []) ? 0 : 1;
+  const ancestors = [root.key];
+  for (const child of root.children ?? []) {
+    if (!isSuspendedCategory(child.key, ancestors)) n += 1;
+  }
+  return total + n;
+}, 0);
 
 before(async () => {
   replSet = await createReplSet();
@@ -93,7 +103,7 @@ test('seeded schemas stay valid, filterable flags are usable, and no auction met
   assert.match(String(injected.errors.nonsense), /unknown/i);
 
   const categories = await taxonomy.list(true);
-  assert.ok(categories.length >= CATEGORY_COUNT);
+  assert.equal(categories.length, VISIBLE_CATEGORY_COUNT);
   for (const category of categories) {
     // Business decision pending: the seed must not grant auction selling to any category.
     assert.ok(
@@ -105,4 +115,14 @@ test('seeded schemas stay valid, filterable flags are usable, and no auction met
   const locations = await createLocationService({ db: handle.db, logger: silentLogger() }).list({ includeInactive: true });
   assert.ok(locations.every((location) => location.countryCode === 'QA'));
   assert.ok(locations.some((location) => location.point !== null), 'at least one area carries validated coordinates');
+});
+
+test('taxonomy list hides suspended jobs and property roots from every panel', async () => {
+  const taxonomy = createTaxonomyService({ db: handle.db, logger: silentLogger(), withTransaction: handle.withTransaction });
+  for (const includeInactive of [false, true]) {
+    const listed = await taxonomy.list(includeInactive);
+    for (const category of listed) {
+      assert.equal(isSuspendedCategory(category.key, category.ancestors), false, `${category.key} must not appear in list(${includeInactive})`);
+    }
+  }
 });

@@ -6,7 +6,7 @@ import { COLLECTIONS } from '../../db/indexes.ts';
 import { AppError } from '../../shared/errors.ts';
 import { parseInput } from '../../shared/validate.ts';
 import { toUserDto } from '../auth/dto.ts';
-import { requireActiveUser, requireAuth, requireCapability } from '../auth/middleware.ts';
+import { requireActiveUser, requireAuth, requireCapability, requireMfa } from '../auth/middleware.ts';
 
 const TERMS_KEY = 'terms';
 
@@ -19,7 +19,7 @@ function noStore(_req: unknown, res: { setHeader: (k: string, v: string) => void
 export function accountRouter(deps: { db: Db }): Router {
   const router = Router();
   router.use(noStore);
-  router.get('/', requireAuth(), requireActiveUser(), async (req, res, next) => {
+  router.get('/', requireAuth(), requireActiveUser(), requireMfa(), async (req, res, next) => {
     try {
       const ref = req.auth!.user.publicReference;
       const [bids, orders] = await Promise.all([
@@ -73,7 +73,7 @@ export function accountRouter(deps: { db: Db }): Router {
       });
     } catch (err) { next(err); }
   });
-  router.post('/terms', requireAuth(), requireActiveUser(), async (req, res, next) => {
+  router.post('/terms', requireAuth(), requireActiveUser(), requireMfa(), async (req, res, next) => {
     try {
       const body = parseInput(z.object({ version: z.number().int().positive() }).strict(), req.body);
       const published = await deps.db.collection(COLLECTIONS.contentDocuments).findOne({ key: TERMS_KEY, status: 'published' });

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { parseInput } from '../../shared/validate.ts';
-import { requireActiveUser, requireAuth, requireCapability } from '../auth/middleware.ts';
+import { requireActiveUser, requireAuth, requireCapability, requireMfa } from '../auth/middleware.ts';
 import { parseFulfillmentBody } from '../orders/service.ts';
 import { toAdminListingDto, toCustomerListingDto, toPublicListingDto } from './dto.ts';
 import { AUDIENCES, CONDITIONS, LANGUAGE_MODES, LISTING_METHODS, type ListingMethod } from './models.ts';
@@ -33,6 +33,7 @@ const publicQuerySchema = z.object({
   sort: z.enum(PUBLIC_SORTS).default('recent'),
   page: z.coerce.number().int().min(1).max(1000).default(1),
   limit: z.coerce.number().int().min(1).max(MAX_PUBLIC_PAGE_SIZE).default(12),
+  endingSoonHours: z.coerce.number().int().min(1).max(24).optional(),
 });
 
 const listingReferenceSchema = z.string().regex(/^l_[A-Za-z0-9_-]{6,32}$/, 'invalid listing reference');
@@ -115,6 +116,7 @@ export function publicListingRouter(deps: ListingRouterDeps): Router {
         ...(query.city ? { cityKey: query.city.toLowerCase() } : {}),
         ...(query.featured === 'true' ? { featuredOnly: true } : {}),
         ...(query.audience ? { audience: query.audience } : {}),
+        ...(query.endingSoonHours !== undefined ? { endingSoonHours: query.endingSoonHours } : {}),
         sort: query.sort,
         page: query.page,
         limit: query.limit,
@@ -141,6 +143,7 @@ export function publicListingRouter(deps: ListingRouterDeps): Router {
           city: query.city ?? null,
           featured: query.featured === 'true',
           audience: query.audience ?? null,
+          endingSoonHours: query.endingSoonHours ?? null,
         },
       });
     } catch (err) {
@@ -148,7 +151,7 @@ export function publicListingRouter(deps: ListingRouterDeps): Router {
     }
   });
 
-  router.post('/:ref/buy', requireAuth(), requireActiveUser(), async (req, res, next) => {
+  router.post('/:ref/buy', requireAuth(), requireActiveUser(), requireMfa(), async (req, res, next) => {
     try {
       const ref = parseInput(listingReferenceSchema, String(req.params.ref), 'Invalid listing reference');
       const body = parseInput(buySchema, req.body ?? {});

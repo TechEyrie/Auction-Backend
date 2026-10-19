@@ -33,7 +33,7 @@ export async function createAdminFixture(options: {
   await client.bootstrap();
   const login = await client.post('/api/auth/login', { identifier: options.phone, password: options.password });
   if (login.status !== 200) throw new Error(`admin login failed: ${JSON.stringify(login.body)}`);
-  const enroll = await client.post('/api/auth/mfa/enroll', { currentPassword: options.password });
+  const enroll = await client.post('/api/auth/mfa/enroll', {});
   if (enroll.status !== 200) throw new Error(`admin enroll failed: ${JSON.stringify(enroll.body)}`);
   const secret = (enroll.body as { secret: string }).secret;
   const confirm = await client.post('/api/auth/mfa/enroll/confirm', { code: generateTotp(secret) });
@@ -44,7 +44,17 @@ export async function createAdminFixture(options: {
   return { client, phone: options.phone, password: options.password, publicReference: user.publicReference };
 }
 
-/** A plain signed-in customer, for permission checks. */
+/** Enroll and confirm TOTP so customer-only MFA gates pass. */
+export async function satisfyCustomerMfa(client: TestClient): Promise<string> {
+  const enroll = await client.post('/api/auth/mfa/enroll', {});
+  if (enroll.status !== 200) throw new Error(`customer enroll failed: ${JSON.stringify(enroll.body)}`);
+  const secret = (enroll.body as { secret: string }).secret;
+  const confirm = await client.post('/api/auth/mfa/enroll/confirm', { code: generateTotp(secret) });
+  if (confirm.status !== 200) throw new Error(`customer confirm failed: ${JSON.stringify(confirm.body)}`);
+  return secret;
+}
+
+/** A plain signed-in customer with MFA satisfied, for permission checks. */
 export async function createCustomerFixture(options: {
   baseUrl: string;
   phone: string;
@@ -60,5 +70,6 @@ export async function createCustomerFixture(options: {
     termsAccepted: true,
   });
   if (register.status !== 201) throw new Error(`customer fixture failed: ${JSON.stringify(register.body)}`);
+  await satisfyCustomerMfa(client);
   return client;
 }

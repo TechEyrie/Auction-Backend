@@ -38,7 +38,7 @@ const ADMIN_PHONE = '55556000';
 const ADMIN_PW = 'listings admin pw 1';
 const BOOTSTRAP_TOKEN = 'listings-integration-token';
 const CUSTOMER_PHONE = '55556001';
-const CUSTOMER_PW = 'listings customer pw 1';
+const CUSTOMER_PW = 'Listings-Integration-Pw-2026!9x';
 
 /** Fixture world, created once: sellers, taxonomy, schemas and locations. */
 const world = {
@@ -1258,7 +1258,7 @@ test('P05 audience filters public listings and is required to publish', async ()
   const attached = (await attachMedia(draft.listingReference, draft.version, [asset.body.asset!.assetId])).body as { listing: ListingDto };
   const refused = await admin.post(`/api/admin/listings/${draft.listingReference}/publish`, { expectedVersion: attached.listing.version });
   assert.equal(refused.status, 422);
-  assert.match((refused.body as { error: { fieldErrors: Record<string, string> } }).error.fieldErrors.audience ?? '', /Men or Women/i);
+  assert.match((refused.body as { error: { fieldErrors: Record<string, string> } }).error.fieldErrors.audience ?? '', /Men, Women or Unisex/i);
 });
 
 test('P05-E13 the wizard can explain every refusal without a fake success path', async () => {
@@ -1352,4 +1352,102 @@ test('fixed-price buy reserves inventory, pays once, and refuses publish without
   });
   assert.equal(pay.status, 200);
   assert.equal(pay.body.order.paymentState, 'paid');
+});
+
+async function openLot(listingReference: string, startsAt: Date, endsAt: Date) {
+  const created = await admin.post<{ auction: { lotReference: string } }>('/api/admin/auctions', {
+    listingReference,
+    startingBidMinor: 10_000,
+    incrementMinor: 500,
+    startsAt: startsAt.toISOString(),
+    endsAt: endsAt.toISOString(),
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const lot = created.body.auction.lotReference;
+  const opened = await admin.post(`/api/admin/auctions/${lot}/open`);
+  assert.equal(opened.status, 200, JSON.stringify(opened.body));
+  return lot;
+}
+
+test('at most ten published listings can be featured', async () => {
+  const existing = await handle.db.collection(COLLECTIONS.listings).countDocuments({
+    status: 'published',
+    archivedAt: null,
+    'moderation.state': { $ne: 'blocked' },
+    'featured.featured': true,
+  });
+  const fill = Math.max(0, 10 - existing);
+  const featuredRefs: string[] = [];
+  for (let i = 0; i < fill; i++) {
+    const row = await createPublishedListing({
+      categoryKey: 'cars',
+      titleEn: `Featured cap ${Date.now()} ${i}`,
+      featured: true,
+      attributes: { make: 'toyota', model: `Cap ${i}` },
+    });
+    featuredRefs.push(row.reference);
+  }
+
+  const spare = await createPublishedListing({
+    categoryKey: 'cars',
+    titleEn: `Featured cap spare ${Date.now()}`,
+    attributes: { make: 'nissan', model: 'Spare' },
+  });
+  const denied = await patchListing(spare.reference, { featured: true, expectedVersion: spare.version });
+  assert.equal(denied.status, 422);
+  assert.equal(
+    (denied.body as { error: { fieldErrors: Record<string, string> } }).error.fieldErrors.featured,
+    'At most 10 published listings can be featured. Unfeature one first.',
+  );
+
+  let victimRef = featuredRefs[0];
+  if (!victimRef) {
+    const one = await handle.db.collection(COLLECTIONS.listings).findOne({
+      status: 'published',
+      archivedAt: null,
+      'moderation.state': { $ne: 'blocked' },
+      'featured.featured': true,
+    });
+    assert.ok(one?.listingReference);
+    victimRef = one!.listingReference as string;
+  }
+  assert.ok(victimRef);
+  const loaded = await admin.get<{ listing: ListingDto }>(`/api/admin/listings/${victimRef}`);
+  assert.equal(loaded.status, 200);
+  const unfeatured = await patchListing(victimRef, {
+    featured: false,
+    expectedVersion: loaded.body.listing.version,
+  });
+  assert.equal(unfeatured.status, 200);
+
+  const allowed = await patchListing(spare.reference, { featured: true, expectedVersion: spare.version });
+  assert.equal(allowed.status, 200);
+
+  const reloadSpare = await admin.get<{ listing: ListingDto }>(`/api/admin/listings/${spare.reference}`);
+  const noop = await patchListing(spare.reference, {
+    featured: true,
+    expectedVersion: reloadSpare.body.listing.version,
+  });
+  assert.equal(noop.status, 200);
+});
+
+test('endingSoonHours lists live auctions closing inside the window', async () => {
+  const shape = await fetch(`${baseUrl}/api/listings?endingSoonHours=2&limit=20`);
+  assert.equal(shape.status, 200);
+  const shapeBody = (await shape.json()) as { listings: unknown[]; filters: { endingSoonHours: number | null } };
+  assert.ok(Array.isArray(shapeBody.listings));
+  assert.equal(shapeBody.filters.endingSoonHours, 2);
+
+  const published = await createPublishedListing({
+    categoryKey: 'cars',
+    titleEn: `Ending soon window ${Date.now()}`,
+    attributes: { make: 'toyota', model: 'Window' },
+  });
+  const now = Date.now();
+  await openLot(published.reference, new Date(now - 60_000), new Date(now + 45 * 60_000));
+
+  const listed = await fetch(`${baseUrl}/api/listings?endingSoonHours=2&limit=20`);
+  assert.equal(listed.status, 200);
+  const refs = ((await listed.json()) as { listings: Array<{ listingReference: string }> }).listings.map((row) => row.listingReference);
+  assert.ok(refs.includes(published.reference));
 });

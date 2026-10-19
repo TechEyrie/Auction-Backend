@@ -22,6 +22,7 @@ import type { MediaStorage } from './modules/media/storage.ts';
 import { adminListingRouter, publicListingRouter } from './modules/listings/routes.ts';
 import { paymentRouter, orderRouter } from './modules/payments/routes.ts';
 import { adminAuctionRouter, auctionRouter } from './modules/auctions/routes.ts';
+import { auctionCalendarRouter } from './modules/auction-calendar/routes.ts';
 import { financeRouter } from './modules/finance/routes.ts';
 import { accountRouter, adminContentRouter, contentRouter, enquiryRouter } from './modules/account/routes.ts';
 
@@ -87,6 +88,7 @@ export function createApp(deps: AppDeps): Express {
   };
   app.use('/api/payments', paymentRouter({ db: deps.db, config: deps.config }));
   app.use('/api/orders', orderRouter({ db: deps.db }));
+  app.use('/api/auction-calendar', auctionCalendarRouter({ db: deps.db }));
   app.use('/api/auctions', auctionRouter({ db: deps.db, config: deps.config, withTransaction: deps.withTransaction }));
   app.use('/api/admin/auctions', adminAuctionRouter({ db: deps.db, withTransaction: deps.withTransaction }));
   app.use('/api/admin/finance', financeRouter({ db: deps.db }));

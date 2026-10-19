@@ -37,3 +37,9 @@ export type CategoryDoc = {
 export type CategoryWithId = CategoryDoc & { _id: ObjectId };
 
 export const MAX_CATEGORY_DEPTH = 4;
+
+export const SUSPENDED_CATEGORY_ROOTS = ['jobs', 'property'] as const;
+export function isSuspendedCategory(key: string, ancestors: readonly string[]): boolean {
+  return (SUSPENDED_CATEGORY_ROOTS as readonly string[]).includes(key)
+    || ancestors.some((a) => (SUSPENDED_CATEGORY_ROOTS as readonly string[]).includes(a));
+}

@@ -88,7 +88,7 @@ export const openApiDocument: OpenApiDocument = {
       post: { summary: 'Sign out', responses: { '200': { description: 'Session revoked' }, '403': errorResponse } },
     },
     '/api/auth/mfa/enroll': {
-      post: { summary: 'Begin MFA enrollment (staff)', responses: { '200': { description: 'TOTP secret' }, '403': errorResponse } },
+      post: { summary: 'Begin MFA enrollment', responses: { '200': { description: 'TOTP secret' }, '403': errorResponse, '409': errorResponse } },
     },
     '/api/auth/mfa/enroll/confirm': {
       post: { summary: 'Confirm MFA enrollment with a TOTP code', responses: { '200': { description: 'MFA enabled' }, '422': errorResponse } },
@@ -251,6 +251,17 @@ export const openApiDocument: OpenApiDocument = {
     },
 
     // ---- Phase 05: public discovery ----
+    '/api/auction-calendar': {
+      get: {
+        summary: 'Sparse month grid of auction end dates grouped by parent category (Qatar civil month)',
+        parameters: [
+          { name: 'year', in: 'query', schema: { type: 'integer', minimum: 2000, maximum: 2100 } },
+          { name: 'month', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 12 } },
+          { name: 'locale', in: 'query', schema: { type: 'string', enum: ['en', 'ar'], default: 'en' } },
+        ],
+        responses: { '200': { description: 'Calendar month payload' }, '422': errorResponse },
+      },
+    },
     '/api/listings': {
       get: {
         summary: 'Published, visible listings only — drafts and archived records are never returned',

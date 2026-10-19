@@ -32,7 +32,9 @@ import {
   findListingBySlug,
   insertListing,
   listAdminListings,
+  listings,
   listPublicListings,
+  publicVisibilityFilter,
   updateListingVersioned,
   type AdminListQuery,
   type Paged,
@@ -80,6 +82,23 @@ const TITLE_MIN = 3;
 const TITLE_MAX = 140;
 const DESC_MIN = 10;
 const DESC_MAX = 8000;
+const MAX_PUBLISHED_FEATURED = 10;
+
+async function countPublishedFeatured(db: Db): Promise<number> {
+  return listings(db).countDocuments({
+    ...publicVisibilityFilter(),
+    'featured.featured': true,
+  });
+}
+
+async function assertPublishedFeaturedCapacity(db: Db, current: ListingWithId, willBeFeatured: boolean): Promise<void> {
+  if (!willBeFeatured || current.featured.featured) return;
+  if (current.status !== 'published' || current.archivedAt) return;
+  const count = await countPublishedFeatured(db);
+  if (count >= MAX_PUBLISHED_FEATURED) {
+    throw fieldError('featured', 'At most 10 published listings can be featured. Unfeature one first.');
+  }
+}
 
 export type ListingLiveAuctionContext = {
   liveLotReference: string | null;
@@ -622,6 +641,33 @@ export function createListingService(deps: ListingDeps) {
         }
         expanded.categoryKeys = [...keys];
       }
+
+      if (query.endingSoonHours !== undefined) {
+        const now = new Date();
+        const deadline = new Date(now.getTime() + query.endingSoonHours * 60 * 60 * 1000);
+        const rows = await db
+          .collection(COLLECTIONS.auctions)
+          .find({
+            ...activeLiveAuctionFilter(now),
+            endsAt: { $lte: deadline },
+          })
+          .sort({ endsAt: 1 })
+          .limit(query.limit)
+          .project({ listingReference: 1 })
+          .toArray();
+        const orderedRefs = rows
+          .map((row) => row.listingReference)
+          .filter((ref): ref is string => typeof ref === 'string');
+        if (orderedRefs.length === 0) {
+          return { items: [], page: query.page, limit: query.limit, total: 0, totalPages: 1 };
+        }
+        expanded.listingReferences = orderedRefs;
+        const page = await listPublicListings(db, expanded);
+        const byRef = new Map(page.items.map((item) => [item.listingReference, item]));
+        const items = orderedRefs.map((ref) => byRef.get(ref)).filter((item): item is ListingWithId => item !== undefined);
+        return { items, page: query.page, limit: query.limit, total: items.length, totalPages: 1 };
+      }
+
       const liveAuctionListingReferences = await db
         .collection(COLLECTIONS.auctions)
         .distinct('listingReference', activeLiveAuctionFilter());
@@ -780,8 +826,10 @@ export function createListingService(deps: ListingDeps) {
         };
       }
       if (input.featured !== undefined || input.featuredOrder !== undefined) {
+        const featuredNext = input.featured ?? current.featured.featured;
+        await assertPublishedFeaturedCapacity(db, current, featuredNext);
         patch.featured = {
-          featured: input.featured ?? current.featured.featured,
+          featured: featuredNext,
           order: input.featuredOrder ?? current.featured.order,
         };
       }
@@ -852,7 +900,7 @@ export function createListingService(deps: ListingDeps) {
       assertConditionApplies(current.listingMethod, current.condition);
 
       if (!current.audience) {
-        throw fieldError('audience', 'choose Men or Women before publishing');
+        throw fieldError('audience', 'choose Men, Women or Unisex before publishing');
       }
 
       const currentSchema = await attributes.currentForCategory(category.key);
@@ -900,6 +948,13 @@ export function createListingService(deps: ListingDeps) {
         }
         if (asset.status !== 'ready') {
           throw fieldError('media', `image ${entry.assetId} is ${asset.status}, not ready`);
+        }
+      }
+
+      if (current.featured.featured) {
+        const featuredCount = await countPublishedFeatured(db);
+        if (featuredCount >= MAX_PUBLISHED_FEATURED) {
+          throw fieldError('featured', 'At most 10 published listings can be featured. Unfeature one first.');
         }
       }
 

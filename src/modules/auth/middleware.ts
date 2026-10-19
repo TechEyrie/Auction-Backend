@@ -116,7 +116,7 @@ export function requireActiveUser(): RequestHandler {
 export function requireMfa(): RequestHandler {
   return (req, _res, next) => {
     if (!req.auth) return next(new AppError('UNAUTHORIZED', 'Authentication required'));
-    // TEMP: skip when MFA is not enforced (legacy sessions may have mfaSatisfied: false)
+    // Customer-only until staff MFA is re-enabled.
     if (requiresMfa(req.auth.user) && !req.auth.session.mfaSatisfied) {
       return next(new AppError('FORBIDDEN', 'MFA verification required', { details: { code: 'MFA_REQUIRED' } }));
     }

@@ -149,8 +149,8 @@ export function authRouter(deps: AuthRouterDeps): Router {
   router.post('/mfa/enroll', requireAuth(), requireActiveUser(), async (req, res, next) => {
     try {
       const key = requireMfaKey();
-      const body = parseInput(z.object({ currentPassword: z.string().min(1) }), req.body);
-      const result = await service.startMfaEnrollment(req.auth!.user, body.currentPassword, key);
+      const body = parseInput(z.object({ code: z.string().min(4).optional() }), req.body);
+      const result = await service.startMfaEnrollment(req.auth!.user, key, body.code);
       res.json(result);
     } catch (err) {
       next(err);
