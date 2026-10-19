@@ -37,7 +37,7 @@ async function registerClient(phone: string, password = FIXTURE_PW): Promise<Tes
   const client = new TestClient(baseUrl);
   await client.bootstrap();
   const res = await client.post('/api/auth/register', {
-    fullName: `Fixture ${phone}`,
+    fullName: `Customer ${phone}`,
     phone,
     password,
     termsAccepted: true,
@@ -141,11 +141,39 @@ test('C04 authenticated but unauthorized role returns 403', async () => {
   assert.equal((await customer.get('/api/admin/users')).status, 403);
 });
 
+test('register refuses common and short passwords', async () => {
+  const client = new TestClient(baseUrl);
+  await client.bootstrap();
+  const short = await client.post('/api/auth/register', {
+    fullName: 'Weak Pass User',
+    phone: '55550080',
+    password: 'letmein1',
+    termsAccepted: true,
+  });
+  assert.equal(short.status, 422);
+  const common = await client.post('/api/auth/register', {
+    fullName: 'Weak Pass User',
+    phone: '55550081',
+    email: 'weak.pass@example.com',
+    password: 'password123',
+    termsAccepted: true,
+  });
+  assert.equal(common.status, 422);
+  const personal = await client.post('/api/auth/register', {
+    fullName: 'Noor Al Ali',
+    phone: '55550082',
+    email: 'noor.house@example.com',
+    password: 'NoorHouse99',
+    termsAccepted: true,
+  });
+  assert.equal(personal.status, 422);
+});
+
 test('C05 public role/status/verification injection is rejected', async () => {
   const client = new TestClient(baseUrl);
   await client.bootstrap();
   const reg = await client.post('/api/auth/register', {
-    fullName: 'Inject Attempt',
+    fullName: 'Role Check User',
     phone: '55550011',
     password: 'inject me please',
     termsAccepted: true,

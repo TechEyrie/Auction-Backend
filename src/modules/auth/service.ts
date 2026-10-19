@@ -4,6 +4,7 @@ import { AppError, conflict } from '../../shared/errors.ts';
 import type { Logger } from '../../shared/logger.ts';
 import { decryptSecret, encryptSecret, randomToken, recoveryCodeHash, safeEqualHex, sha256Hex } from '../../shared/crypto.ts';
 import { hashPassword, verifyPassword } from '../../shared/password.ts';
+import { evaluatePassword, passwordPolicyMessage } from '../../shared/passwordPolicy.ts';
 import { normalizeEmail, normalizePhoneE164 } from '../../shared/normalize.ts';
 import { generateTotpSecret, verifyTotp, TOTP_STEP_SECONDS } from '../../shared/totp.ts';
 import { recordAudit } from '../audit/repository.ts';
@@ -14,7 +15,6 @@ import type { AuthContext, SessionDoc, UserDoc, UserWithId } from './models.ts';
 
 export type AuthDeps = { db: Db; config: AppConfig; logger: Logger };
 
-const PASSWORD_MIN = 8;
 const CHALLENGE_TTL_MS = 30 * 60_000;
 const CHALLENGE_MAX_ATTEMPTS = 5;
 const RECOVERY_CODE_COUNT = 10;
@@ -34,12 +34,16 @@ export function requiresMfa(_user: UserDoc): boolean {
   return false;
 }
 
-function assertPasswordPolicy(password: string): void {
-  if (typeof password !== 'string' || password.length < PASSWORD_MIN || password.length > 200) {
-    throw new AppError('VALIDATION_ERROR', 'Password does not meet requirements', {
-      fieldErrors: { password: `must be at least ${PASSWORD_MIN} characters` },
-    });
-  }
+function assertPasswordPolicy(
+  password: string,
+  ctx: { email?: string | null; fullName?: string | null } = {},
+): void {
+  const result = evaluatePassword(password, ctx);
+  if (result.acceptable) return;
+  throw new AppError('VALIDATION_ERROR', 'Password does not meet requirements', {
+    fieldErrors: { password: passwordPolicyMessage(result) },
+    details: { score: result.score, issues: result.issues },
+  });
 }
 
 async function issueSession(
@@ -98,7 +102,7 @@ export function createAuthService(deps: AuthDeps) {
         fieldErrors: { email: 'required' },
       });
     }
-    assertPasswordPolicy(input.password);
+    assertPasswordPolicy(input.password, { email: emailNormalized, fullName: input.fullName });
     if (input.termsAccepted !== true) {
       throw new AppError('VALIDATION_ERROR', 'You must accept the terms of use', {
         fieldErrors: { termsAccepted: 'required' },
@@ -218,7 +222,6 @@ export function createAuthService(deps: AuthDeps) {
   }
 
   async function resetPassword(token: string, newPassword: string): Promise<void> {
-    assertPasswordPolicy(newPassword);
     const challenge = await repo.findChallengeByTokenHash(db, sha256Hex(String(token ?? '')));
     if (!challenge || challenge.purpose !== 'password_reset' || challenge.consumedAt) {
       throw new AppError('VALIDATION_ERROR', 'This reset link is invalid or has already been used');
@@ -229,6 +232,11 @@ export function createAuthService(deps: AuthDeps) {
     if (challenge.attempts >= challenge.maxAttempts) {
       throw new AppError('RATE_LIMITED', 'Too many attempts on this reset link');
     }
+    const existing = challenge.userId ? await repo.findUserById(db, challenge.userId) : null;
+    assertPasswordPolicy(newPassword, {
+      email: existing?.emailNormalized ?? null,
+      fullName: existing?.fullName ?? null,
+    });
     await repo.incrementChallengeAttempts(db, challenge._id);
     const consumed = await repo.consumeChallenge(db, challenge._id);
     if (!consumed) throw new AppError('VALIDATION_ERROR', 'This reset link has already been used');

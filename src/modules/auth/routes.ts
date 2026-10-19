@@ -64,7 +64,7 @@ export function authRouter(deps: AuthRouterDeps): Router {
     fullName: z.string().min(2).max(120),
     phone: z.string().min(4).optional().nullable(),
     email: z.string().optional().nullable(),
-    password: z.string().min(8).max(200),
+    password: z.string().min(1).max(200),
     preferredLocale: z.string().max(8).optional(),
     termsAccepted: z.boolean(),
     termsVersion: z.string().max(40).optional().nullable(),
@@ -133,7 +133,7 @@ export function authRouter(deps: AuthRouterDeps): Router {
     }
   });
 
-  const resetSchema = z.object({ token: z.string().min(10), password: z.string().min(8).max(200) });
+  const resetSchema = z.object({ token: z.string().min(10), password: z.string().min(1).max(200) });
 
   router.post('/password/reset', limit('reset'), async (req, res, next) => {
     try {
