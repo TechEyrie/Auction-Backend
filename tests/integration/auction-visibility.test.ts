@@ -76,16 +76,16 @@ before(async () => {
   assert.equal(seller.status, 201, JSON.stringify(seller.body));
   sellerReference = seller.body.seller.sellerReference;
 
-  const category = await admin.post('/api/admin/categories', {
-    key: 'clothing',
+  const clothesRoot = await admin.post('/api/admin/categories', {
+    key: 'clothes-thobes',
     parentKey: null,
-    nameEn: 'Clothing',
-    nameAr: 'ملابس',
-    listingMethods: ['auction', 'fixed_price'],
+    nameEn: 'Clothes and Thobes',
+    nameAr: 'ملابس وثياب',
+    listingMethods: ['auction', 'fixed_price', 'enquiry'],
     active: true,
-    order: 1,
+    order: 9,
   });
-  assert.ok([201, 409].includes(category.status), JSON.stringify(category.body));
+  assert.ok([201, 409].includes(clothesRoot.status), JSON.stringify(clothesRoot.body));
 
   winner = await createCustomerFixture({ baseUrl, phone: '55558101', password: 'winner password 1' });
   stranger = await createCustomerFixture({ baseUrl, phone: '55558102', password: 'stranger password 1' });
@@ -101,7 +101,7 @@ after(async () => {
 async function publishAuctionListing(titleEn: string): Promise<string> {
   const created = await admin.post<{ listing: { listingReference: string; version: number } }>('/api/admin/listings', {
     sellerReference,
-    categoryKey: 'clothing',
+    categoryKey: 'clothes-thobes',
     listingMethod: 'auction',
     audience: 'men',
     languageMode: 'en',

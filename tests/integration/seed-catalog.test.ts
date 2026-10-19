@@ -7,7 +7,7 @@ import { loadConfig } from '../../src/config/index.ts';
 import { COLLECTIONS, ensureIndexes } from '../../src/db/indexes.ts';
 import { silentLogger } from '../helpers/context.ts';
 import { seedCatalog, CATEGORY_SEED, SCHEMA_SEED, LOCATION_SEED } from '../../scripts/seed-catalog.ts';
-import { isSuspendedCategory } from '../../src/modules/taxonomy/models.ts';
+import { isCatalogueCategory } from '../../src/modules/taxonomy/models.ts';
 import { createTaxonomyService } from '../../src/modules/taxonomy/service.ts';
 import { createAttributeService } from '../../src/modules/attributes/service.ts';
 import { createLocationService } from '../../src/modules/locations/service.ts';
@@ -22,15 +22,7 @@ let replSet: MongoMemoryReplSet;
 let handle: DbHandle;
 
 const CATEGORY_COUNT = CATEGORY_SEED.reduce((total, root) => total + 1 + (root.children?.length ?? 0), 0);
-
-const VISIBLE_CATEGORY_COUNT = CATEGORY_SEED.reduce((total, root) => {
-  let n = isSuspendedCategory(root.key, []) ? 0 : 1;
-  const ancestors = [root.key];
-  for (const child of root.children ?? []) {
-    if (!isSuspendedCategory(child.key, ancestors)) n += 1;
-  }
-  return total + n;
-}, 0);
+const VISIBLE_CATEGORY_COUNT = 10;
 
 before(async () => {
   replSet = await createReplSet();
@@ -87,28 +79,26 @@ test('every seeded category has a published attribute schema as its current vers
   }
 });
 
-test('seeded schemas stay valid, filterable flags are usable, and no auction method is enabled', async () => {
+test('seeded schemas stay valid and leaf categories allow auction', async () => {
   const attributes = createAttributeService({ db: handle.db, logger: silentLogger(), withTransaction: handle.withTransaction });
   const taxonomy = createTaxonomyService({ db: handle.db, logger: silentLogger(), withTransaction: handle.withTransaction });
 
-  // A published schema must accept a plausible value set and reject an unknown key.
   const result = await attributes.validateValues(
-    'electronics',
-    { brand: 'apple', model_name: 'iPhone 16', storage: 256, accessories: ['charger'] },
+    'perfume',
+    { item_condition: 'new', brand_name: 'Oud House' },
     'public',
   );
   assert.equal(result.ok, true, JSON.stringify(result.errors));
-  const injected = await attributes.validateValues('electronics', { brand: 'apple', nonsense: 1 }, 'public');
+  const injected = await attributes.validateValues('perfume', { item_condition: 'new', nonsense: 1 }, 'public');
   assert.equal(injected.ok, false, 'an unknown attribute key must not be accepted');
   assert.match(String(injected.errors.nonsense), /unknown/i);
 
   const categories = await taxonomy.list(true);
   assert.equal(categories.length, VISIBLE_CATEGORY_COUNT);
   for (const category of categories) {
-    // Business decision pending: the seed must not grant auction selling to any category.
     assert.ok(
-      !category.listingMethods.includes('auction'),
-      `${category.key} must not be auction-enabled by the seed`,
+      category.listingMethods.includes('auction'),
+      `${category.key} must allow auction listings`,
     );
   }
 
@@ -117,12 +107,14 @@ test('seeded schemas stay valid, filterable flags are usable, and no auction met
   assert.ok(locations.some((location) => location.point !== null), 'at least one area carries validated coordinates');
 });
 
-test('taxonomy list hides suspended jobs and property roots from every panel', async () => {
+test('taxonomy list shows only the product catalogue parents', async () => {
   const taxonomy = createTaxonomyService({ db: handle.db, logger: silentLogger(), withTransaction: handle.withTransaction });
+  const forbidden = new Set(['jobs', 'property', 'vehicles', 'general', 'electronics', 'men', 'women']);
   for (const includeInactive of [false, true]) {
     const listed = await taxonomy.list(includeInactive);
     for (const category of listed) {
-      assert.equal(isSuspendedCategory(category.key, category.ancestors), false, `${category.key} must not appear in list(${includeInactive})`);
+      assert.equal(isCatalogueCategory(category.key, category.ancestors), true, `${category.key} must be catalogue`);
+      assert.equal(forbidden.has(category.key), false, `${category.key} must not appear in list(${includeInactive})`);
     }
   }
 });

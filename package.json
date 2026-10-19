@@ -18,7 +18,7 @@
     "indexes": "node --env-file-if-exists=.env scripts/ensure-indexes.ts",
     "admin:bootstrap": "node --env-file-if-exists=.env scripts/bootstrap-admin.ts",
     "browser:check": "node scripts/browser-check.mjs",
-    "seed:men-women-catalogue": "node --env-file-if-exists=.env scripts/seed-men-women-catalogue.mjs"
+    "catalogue:men-women": "node --env-file-if-exists=.env scripts/migrate-men-women-catalogue.ts --target=development"
   },
   "dependencies": {
     "express": "^5.3.0",

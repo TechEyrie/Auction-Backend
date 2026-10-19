@@ -79,16 +79,16 @@ before(async () => {
   assert.equal(seller.status, 201, JSON.stringify(seller.body));
   sellerReference = seller.body.seller.sellerReference;
 
-  const category = await admin.post('/api/admin/categories', {
-    key: 'clothing',
+  const clothesRoot = await admin.post('/api/admin/categories', {
+    key: 'clothes-thobes',
     parentKey: null,
-    nameEn: 'Clothing',
-    nameAr: 'ملابس',
-    listingMethods: ['auction', 'fixed_price'],
+    nameEn: 'Clothes and Thobes',
+    nameAr: 'ملابس وثياب',
+    listingMethods: ['auction', 'fixed_price', 'enquiry'],
     active: true,
-    order: 1,
+    order: 9,
   });
-  assert.ok([201, 409].includes(category.status), JSON.stringify(category.body));
+  assert.ok([201, 409].includes(clothesRoot.status), JSON.stringify(clothesRoot.body));
 });
 
 after(async () => {
@@ -101,7 +101,7 @@ after(async () => {
 async function publishAuctionListing(titleEn: string): Promise<string> {
   const created = await admin.post<{ listing: { listingReference: string; version: number } }>('/api/admin/listings', {
     sellerReference,
-    categoryKey: 'clothing',
+    categoryKey: 'clothes-thobes',
     listingMethod: 'auction',
     audience: 'men',
     languageMode: 'en',
@@ -177,10 +177,10 @@ test('scheduled lot with future startsAt appears on calendar but not in auction 
   };
   const day = body.days.find((row) => row.date === '2026-10-28');
   assert.ok(day, JSON.stringify(body.days));
-  const clothing = day.groups.find((g) => g.parentCategoryKey === 'clothing' && g.listingCount === 1);
-  assert.ok(clothing);
-  assert.equal(typeof clothing.live, 'boolean');
-  assert.equal(clothing.live, false);
+  const clothesGroup = day.groups.find((g) => g.parentCategoryKey === 'clothes-thobes' && g.listingCount === 1);
+  assert.ok(clothesGroup);
+  assert.equal(typeof clothesGroup.live, 'boolean');
+  assert.equal(clothesGroup.live, false);
 
   const listed = await fetch(`${baseUrl}/api/listings?method=auction&limit=48`);
   assert.equal(listed.status, 200);
@@ -199,7 +199,7 @@ test('closed and unpublished listings are excluded from the calendar', async () 
 
   const draftCreated = await admin.post<{ listing: { listingReference: string } }>('/api/admin/listings', {
     sellerReference,
-    categoryKey: 'clothing',
+    categoryKey: 'clothes-thobes',
     listingMethod: 'auction',
     audience: 'men',
     languageMode: 'en',
@@ -243,7 +243,7 @@ test('two published lots same parent and Qatar day aggregate with min endsAt', a
   };
   const day = body.days.find((row) => row.date === '2026-10-15');
   assert.ok(day, JSON.stringify(body.days));
-  const group = day.groups.find((g) => g.parentCategoryKey === 'clothing');
+  const group = day.groups.find((g) => g.parentCategoryKey === 'clothes-thobes');
   assert.ok(group);
   assert.equal(group.listingCount, 2);
   assert.equal(group.endsAt, OCT_15_EARLY);

@@ -38,8 +38,27 @@ export type CategoryWithId = CategoryDoc & { _id: ObjectId };
 
 export const MAX_CATEGORY_DEPTH = 4;
 
+export const CATALOGUE_ROOTS = [
+  'glasses',
+  'tea-coffee',
+  'abaya',
+  'natural-leather',
+  'perfume',
+  'supplements',
+  'misbah',
+  'watches',
+  'clothes-thobes',
+  'cufflinks',
+] as const;
+
+/** @deprecated Legacy calendar/listing guard; prefer {@link CATALOGUE_ROOTS} and {@link isCatalogueCategory}. */
 export const SUSPENDED_CATEGORY_ROOTS = ['jobs', 'property'] as const;
+
+export function isCatalogueCategory(key: string, ancestors: readonly string[]): boolean {
+  return (CATALOGUE_ROOTS as readonly string[]).includes(key)
+    || ancestors.some((a) => (CATALOGUE_ROOTS as readonly string[]).includes(a));
+}
+
 export function isSuspendedCategory(key: string, ancestors: readonly string[]): boolean {
-  return (SUSPENDED_CATEGORY_ROOTS as readonly string[]).includes(key)
-    || ancestors.some((a) => (SUSPENDED_CATEGORY_ROOTS as readonly string[]).includes(a));
+  return !isCatalogueCategory(key, ancestors);
 }

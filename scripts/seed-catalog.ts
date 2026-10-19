@@ -6,18 +6,6 @@ import { createLocationService } from '../src/modules/locations/service.ts';
 import type { AttributeField } from '../src/modules/attributes/models.ts';
 import type { ListingMethod } from '../src/modules/taxonomy/models.ts';
 
-/**
- * Representative catalogue seed.
- *
- * Two rules govern this data:
- *
- * 1. It is structure, not approval. A category existing here does not approve auctions,
- *    commission, or any commercial term for that category.
- * 2. Auctions are deliberately NOT enabled by the seed. Which categories may be sold at
- *    auction — and under which rules — is an open client decision (see
- *    `docs/OPEN_QUESTIONS.md`). The seed therefore grants the classifieds methods only;
- *    an admin can widen a category in the taxonomy screen once that decision is made.
- */
 const METHODS: ListingMethod[] = ['auction', 'fixed_price', 'enquiry'];
 
 const ACTOR = { reference: 'system:seed', requestId: 'seed' } as const;
@@ -34,78 +22,16 @@ type CategorySeed = {
 };
 
 export const CATEGORY_SEED: CategorySeed[] = [
-  {
-    key: 'vehicles',
-    parentKey: null,
-    nameEn: 'Vehicles',
-    nameAr: 'مركبات',
-    descriptionEn: 'Cars, motorcycles, boats and parts.',
-    icon: 'car',
-    order: 1,
-    children: [
-      { key: 'cars', nameEn: 'Cars', nameAr: 'سيارات', order: 1 },
-      { key: 'motorcycles', nameEn: 'Motorcycles', nameAr: 'دراجات نارية', order: 2 },
-      { key: 'boats', nameEn: 'Boats', nameAr: 'قوارب', order: 3 },
-      { key: 'vehicle-parts', nameEn: 'Spare parts', nameAr: 'قطع غيار', order: 4 },
-    ],
-  },
-  {
-    key: 'property',
-    parentKey: null,
-    nameEn: 'Property',
-    nameAr: 'عقارات',
-    descriptionEn: 'Apartments, villas, land and offices.',
-    icon: 'home',
-    order: 2,
-    children: [
-      { key: 'apartments', nameEn: 'Apartments', nameAr: 'شقق', order: 1 },
-      { key: 'villas', nameEn: 'Villas', nameAr: 'فلل', order: 2 },
-      { key: 'land', nameEn: 'Land', nameAr: 'أراضي', order: 3 },
-      { key: 'offices', nameEn: 'Offices', nameAr: 'مكاتب', order: 4 },
-    ],
-  },
-  {
-    key: 'electronics',
-    parentKey: null,
-    nameEn: 'Electronics',
-    nameAr: 'إلكترونيات',
-    descriptionEn: 'Phones, computers, cameras and accessories.',
-    icon: 'device',
-    order: 3,
-    children: [
-      { key: 'phones', nameEn: 'Phones', nameAr: 'هواتف', order: 1 },
-      { key: 'computers', nameEn: 'Computers', nameAr: 'حواسيب', order: 2 },
-      { key: 'cameras', nameEn: 'Cameras', nameAr: 'كاميرات', order: 3 },
-    ],
-  },
-  {
-    key: 'jobs',
-    parentKey: null,
-    nameEn: 'Jobs',
-    nameAr: 'وظائف',
-    descriptionEn: 'Hiring and service opportunities.',
-    icon: 'briefcase',
-    order: 4,
-    children: [
-      { key: 'drivers', nameEn: 'Drivers', nameAr: 'سائقون', order: 1 },
-      { key: 'technicians', nameEn: 'Technicians', nameAr: 'فنيون', order: 2 },
-      { key: 'office-roles', nameEn: 'Office roles', nameAr: 'وظائف مكتبية', order: 3 },
-    ],
-  },
-  {
-    key: 'general',
-    parentKey: null,
-    nameEn: 'General items',
-    nameAr: 'منوعات',
-    descriptionEn: 'Furniture, clothing, sports and everything else.',
-    icon: 'tag',
-    order: 5,
-    children: [
-      { key: 'furniture', nameEn: 'Furniture', nameAr: 'أثاث', order: 1 },
-      { key: 'clothing', nameEn: 'Clothing', nameAr: 'ملابس', order: 2 },
-      { key: 'sports', nameEn: 'Sports', nameAr: 'رياضة', order: 3 },
-    ],
-  },
+  { key: 'glasses', parentKey: null, nameEn: 'Glasses', nameAr: 'نظارات', descriptionEn: 'Eyewear and sunglasses.', icon: 'glasses', order: 1 },
+  { key: 'tea-coffee', parentKey: null, nameEn: 'Tea & Coffee', nameAr: 'شاي وقهوة', descriptionEn: 'Tea, coffee and related accessories.', icon: 'tea-coffee', order: 2 },
+  { key: 'abaya', parentKey: null, nameEn: 'Abaya', nameAr: 'عباية', descriptionEn: 'Abayas and related garments.', icon: 'abaya', order: 3 },
+  { key: 'natural-leather', parentKey: null, nameEn: 'Natural Leather', nameAr: 'جلد طبيعي', descriptionEn: 'Leather goods and accessories.', icon: 'natural-leather', order: 4 },
+  { key: 'perfume', parentKey: null, nameEn: 'Perfume', nameAr: 'عطور', descriptionEn: 'Perfumes, oud and fragrances.', icon: 'perfume', order: 5 },
+  { key: 'supplements', parentKey: null, nameEn: 'Supplements', nameAr: 'مكملات', descriptionEn: 'Health and nutritional supplements.', icon: 'supplements', order: 6 },
+  { key: 'misbah', parentKey: null, nameEn: 'Misbah', nameAr: 'مسباح', descriptionEn: 'Prayer beads and misbah.', icon: 'misbah', order: 7 },
+  { key: 'watches', parentKey: null, nameEn: 'Watches', nameAr: 'ساعات', descriptionEn: 'Watches and timepieces.', icon: 'watches', order: 8 },
+  { key: 'clothes-thobes', parentKey: null, nameEn: 'Clothes and Thobes', nameAr: 'ملابس وثياب', descriptionEn: 'Clothing, thobes and apparel.', icon: 'clothes-thobes', order: 9 },
+  { key: 'cufflinks', parentKey: null, nameEn: 'Cufflinks', nameAr: 'أزرار أكمام', descriptionEn: 'Cufflinks and formal accessories.', icon: 'cufflinks', order: 10 },
 ];
 
 function field(input: Partial<AttributeField> & Pick<AttributeField, 'key' | 'type' | 'labelEn'>): AttributeField {
@@ -127,105 +53,39 @@ function field(input: Partial<AttributeField> & Pick<AttributeField, 'key' | 'ty
   };
 }
 
-export const SCHEMA_SEED: Record<string, AttributeField[]> = {
-  vehicles: [
-    field({ key: 'make', type: 'text', labelEn: 'Make', required: true, filterable: true, order: 1 }),
-    field({ key: 'model', type: 'text', labelEn: 'Model', required: true, filterable: true, order: 2 }),
-    field({ key: 'year', type: 'number', labelEn: 'Year', required: true, filterable: true, order: 3, constraints: { min: 1950, max: 2100, integer: true } }),
-    field({
-      key: 'condition',
-      type: 'select',
-      labelEn: 'Condition',
-      required: true,
-      filterable: true,
-      order: 4,
-      options: [
-        { key: 'new', labelEn: 'New' },
-        { key: 'used', labelEn: 'Used' },
-      ],
-    }),
-    field({ key: 'mileage', type: 'number', labelEn: 'Mileage', unit: 'km', filterable: true, order: 5, constraints: { min: 0, integer: true }, dependsOn: { field: 'condition', equals: 'used' } }),
-    field({ key: 'transmission', type: 'select', labelEn: 'Transmission', filterable: true, order: 6, options: [{ key: 'automatic', labelEn: 'Automatic' }, { key: 'manual', labelEn: 'Manual' }] }),
-    field({ key: 'fuel', type: 'select', labelEn: 'Fuel', filterable: true, order: 7, options: [{ key: 'petrol', labelEn: 'Petrol' }, { key: 'diesel', labelEn: 'Diesel' }, { key: 'hybrid', labelEn: 'Hybrid' }, { key: 'electric', labelEn: 'Electric' }] }),
-    field({ key: 'accident_history', type: 'text', labelEn: 'Accident history', publicDisplay: false, adminOnly: false, order: 8 }),
-  ],
-  property: [
-    field({
-      key: 'property_type',
-      type: 'select',
-      labelEn: 'Property type',
-      required: true,
-      filterable: true,
-      order: 1,
-      options: [
-        { key: 'apartment', labelEn: 'Apartment' },
-        { key: 'villa', labelEn: 'Villa' },
-        { key: 'land', labelEn: 'Land' },
-        { key: 'office', labelEn: 'Office' },
-      ],
-    }),
-    field({ key: 'bedrooms', type: 'number', labelEn: 'Bedrooms', filterable: true, order: 2, constraints: { min: 0, max: 30, integer: true } }),
-    field({ key: 'bathrooms', type: 'number', labelEn: 'Bathrooms', filterable: true, order: 3, constraints: { min: 0, max: 30, integer: true } }),
-    field({ key: 'area', type: 'number', labelEn: 'Area', unit: 'm²', filterable: true, order: 4, constraints: { min: 0 } }),
-    field({ key: 'furnished', type: 'boolean', labelEn: 'Furnished', filterable: true, order: 5 }),
-    field({ key: 'title_deed_note', type: 'text', labelEn: 'Title deed note', publicDisplay: false, adminOnly: true, order: 6, helpEn: 'Internal note for verifying ownership documents.' }),
-  ],
-  electronics: [
-    field({
-      key: 'brand',
-      type: 'select',
-      labelEn: 'Brand',
-      required: true,
-      filterable: true,
-      order: 1,
-      options: [
-        { key: 'apple', labelEn: 'Apple' },
-        { key: 'samsung', labelEn: 'Samsung' },
-        { key: 'other', labelEn: 'Other' },
-      ],
-    }),
-    field({ key: 'model_name', type: 'text', labelEn: 'Model', required: true, filterable: true, order: 2 }),
-    field({ key: 'storage', type: 'number', labelEn: 'Storage', unit: 'GB', filterable: true, order: 3, constraints: { min: 0, integer: true } }),
-    field({ key: 'warranty_months', type: 'number', labelEn: 'Warranty', unit: 'months', order: 4, constraints: { min: 0, max: 120, integer: true } }),
-    field({ key: 'accessories', type: 'multiselect', labelEn: 'Included accessories', order: 5, options: [{ key: 'charger', labelEn: 'Charger' }, { key: 'box', labelEn: 'Original box' }, { key: 'receipt', labelEn: 'Receipt' }] }),
-  ],
-  jobs: [
-    field({
-      key: 'employment_type',
-      type: 'select',
-      labelEn: 'Employment type',
-      required: true,
-      filterable: true,
-      order: 1,
-      options: [
-        { key: 'full-time', labelEn: 'Full time' },
-        { key: 'part-time', labelEn: 'Part time' },
-        { key: 'contract', labelEn: 'Contract' },
-      ],
-    }),
-    field({ key: 'experience_years', type: 'number', labelEn: 'Experience required', unit: 'years', filterable: true, order: 2, constraints: { min: 0, max: 50, integer: true } }),
-    field({ key: 'salary_note', type: 'text', labelEn: 'Salary note', order: 3, helpEn: 'Free text; salary bands are not a published feature yet.' }),
-    field({ key: 'start_date', type: 'date', labelEn: 'Start date', order: 4 }),
-  ],
-  general: [
-    field({
-      key: 'item_condition',
-      type: 'select',
-      labelEn: 'Condition',
-      required: true,
-      filterable: true,
-      order: 1,
-      options: [
-        { key: 'new', labelEn: 'New' },
-        { key: 'like-new', labelEn: 'Like new' },
-        { key: 'used', labelEn: 'Used' },
-      ],
-    }),
-    field({ key: 'brand_name', type: 'text', labelEn: 'Brand', filterable: true, order: 2 }),
-    field({ key: 'dimensions_note', type: 'text', labelEn: 'Dimensions', order: 3 }),
-    field({ key: 'delivery_available', type: 'boolean', labelEn: 'Delivery available', filterable: true, order: 4 }),
-  ],
-};
+const LEAF_FIELDS: AttributeField[] = [
+  field({
+    key: 'item_condition',
+    type: 'select',
+    labelEn: 'Condition',
+    required: true,
+    filterable: true,
+    order: 1,
+    options: [
+      { key: 'new', labelEn: 'New' },
+      { key: 'like-new', labelEn: 'Like new' },
+      { key: 'used', labelEn: 'Used' },
+    ],
+  }),
+  field({ key: 'brand_name', type: 'text', labelEn: 'Brand', filterable: true, order: 2 }),
+];
+
+const LEAF_CATEGORY_KEYS = [
+  'glasses',
+  'tea-coffee',
+  'abaya',
+  'natural-leather',
+  'perfume',
+  'supplements',
+  'misbah',
+  'watches',
+  'clothes-thobes',
+  'cufflinks',
+] as const;
+
+export const SCHEMA_SEED: Record<string, AttributeField[]> = Object.fromEntries(
+  LEAF_CATEGORY_KEYS.map((key) => [key, LEAF_FIELDS]),
+);
 
 export const LOCATION_SEED: Array<{
   countryCode: string;

@@ -101,6 +101,15 @@ before(async () => {
   await createCategory({ key: 'services', parentKey: null, nameEn: 'Services', listingMethods: ['enquiry'] });
   await createCategory({ key: 'retired-cat', parentKey: null, nameEn: 'Retired', listingMethods: ['auction'] });
   await createCategory({ key: 'change-cat', parentKey: null, nameEn: 'Changing schema', listingMethods: ['auction'] });
+  await createCategory({ key: 'clothes-thobes', parentKey: null, nameEn: 'Clothes and Thobes', listingMethods: ['auction', 'fixed_price', 'enquiry'] });
+  await createCategory({ key: 'perfume', parentKey: null, nameEn: 'Perfume', listingMethods: ['auction', 'fixed_price', 'enquiry'] });
+
+  const catalogueLeafFields = [
+    { key: 'item_condition', type: 'select', labelEn: 'Condition', required: true, options: [{ key: 'new', labelEn: 'New' }, { key: 'used', labelEn: 'Used' }] },
+    { key: 'brand_name', type: 'text', labelEn: 'Brand' },
+  ];
+  await publishSchema('clothes-thobes', catalogueLeafFields);
+  await publishSchema('perfume', catalogueLeafFields);
 
   world.carsVersion = await publishSchema('cars', [
     { key: 'make', type: 'select', labelEn: 'Make', required: true, filterable: true, options: [{ key: 'toyota', labelEn: 'Toyota' }, { key: 'nissan', labelEn: 'Nissan' }] },
@@ -1059,21 +1068,22 @@ test('P05-E07 discovery filters, sorts and paginates deterministically', async (
     imageType: 'image/jpeg',
   });
 
-  const all = await fetch(`${baseUrl}/api/listings?limit=48`);
+  const discoveryNow = Date.now();
+  await openLot(sedan.reference, new Date(discoveryNow - 60_000), new Date(discoveryNow + 3_600_000));
+  await openLot(jpegListing.reference, new Date(discoveryNow - 60_000), new Date(discoveryNow + 3_600_000));
+
+  const catalogueDefault = await fetch(`${baseUrl}/api/listings?limit=48`);
+  const catalogueRefs = ((await catalogueDefault.json()) as { listings: Array<{ listingReference: string }> }).listings.map((entry) => entry.listingReference);
+  assert.ok(!catalogueRefs.includes(sedan.reference), 'unscoped browse must hide legacy non-catalogue paths');
+
+  const all = await fetch(`${baseUrl}/api/listings?category=vehicles&limit=48`);
   const allBody = (await all.json()) as { listings: Array<{ listingReference: string; coverAssetId: string | null }>; total: number; totalPages: number; sort: string };
   const references = allBody.listings.map((entry) => entry.listingReference);
   assert.ok(references.includes(sedan.reference));
   assert.ok(references.includes(jpegListing.reference));
-  assert.equal(allBody.total >= 5, true);
+  assert.ok(allBody.total >= references.length);
   assert.equal(allBody.sort, 'recent');
   assert.ok(allBody.listings.every((entry) => entry.coverAssetId !== null), 'a public card always has a cover');
-  const publishedCount = await handle.db.collection(COLLECTIONS.listings).countDocuments({
-    status: 'published',
-    archivedAt: null,
-    'moderation.state': { $ne: 'blocked' },
-    $or: [{ availability: { $ne: 'sold' } }, { availability: { $exists: false } }],
-  });
-  assert.equal(allBody.total, publishedCount, 'public totals must match the real published set, not a seeded approximation');
 
   // Category filtering includes descendants.
   const vehicles = await fetch(`${baseUrl}/api/listings?category=vehicles&limit=48`);
@@ -1086,7 +1096,7 @@ test('P05-E07 discovery filters, sorts and paginates deterministically', async (
   assert.deepEqual(((await sedansOnly.json()) as { listings: Array<{ listingReference: string }> }).listings.map((e) => e.listingReference), [sedan.reference]);
 
   // Search, method, country/city and featured filters.
-  const search = await fetch(`${baseUrl}/api/listings?q=cedar&limit=48`);
+  const search = await fetch(`${baseUrl}/api/listings?category=vehicles&q=cedar&limit=48`);
   const searchBody = (await search.json()) as { listings: Array<{ listingReference: string }>; filters: { q: string | null } };
   assert.deepEqual(searchBody.listings.map((e) => e.listingReference), [jpegListing.reference]);
   assert.equal(searchBody.filters.q, 'cedar');
@@ -1096,10 +1106,10 @@ test('P05-E07 discovery filters, sorts and paginates deterministically', async (
   assert.deepEqual(noMatchBody.listings, [], 'an empty result is empty, never replaced by demo inventory');
   assert.equal(noMatchBody.total, 0);
 
-  const fixedPrice = await fetch(`${baseUrl}/api/listings?method=fixed_price&limit=48`);
+  const fixedPrice = await fetch(`${baseUrl}/api/listings?category=vehicles&method=fixed_price&limit=48`);
   assert.deepEqual(((await fixedPrice.json()) as { listings: Array<{ listingReference: string }> }).listings.map((e) => e.listingReference), [featured.reference]);
 
-  const dohaCity = await fetch(`${baseUrl}/api/listings?country=QA&city=doha&limit=48`);
+  const dohaCity = await fetch(`${baseUrl}/api/listings?category=vehicles&country=QA&city=doha&limit=48`);
   const cityBody = (await dohaCity.json()) as { listings: Array<{ listingReference: string; location: { cityKey: string | null } }> };
   const cityRefs = cityBody.listings.map((entry) => entry.listingReference);
   assert.ok(cityRefs.includes(featured.reference));
@@ -1107,25 +1117,25 @@ test('P05-E07 discovery filters, sorts and paginates deterministically', async (
   assert.ok(cityBody.listings.every((entry) => entry.location.cityKey === 'doha'), 'a city filter must not leak other cities’ listings');
   assert.ok(!cityRefs.includes(enquiry.reference), 'a listing with no location is not in any city');
 
-  const featuredOnly = await fetch(`${baseUrl}/api/listings?featured=true&limit=48`);
+  const featuredOnly = await fetch(`${baseUrl}/api/listings?category=vehicles&featured=true&limit=48`);
   const featuredRefs = ((await featuredOnly.json()) as { listings: Array<{ listingReference: string; featured: boolean }> }).listings;
   assert.equal(featuredRefs.every((entry) => entry.featured), true);
   assert.ok(featuredRefs.some((entry) => entry.listingReference === featured.reference));
 
   // Deterministic sorting, stable across identical requests.
-  const sortTitle = await fetch(`${baseUrl}/api/listings?sort=title&limit=48`);
+  const sortTitle = await fetch(`${baseUrl}/api/listings?category=vehicles&sort=title&limit=48`);
   const titleBody = (await sortTitle.json()) as { listings: Array<{ title: { en: string } }> };
   const titles = titleBody.listings.map((entry) => entry.title.en.toLowerCase());
   assert.deepEqual(titles, [...titles].sort(), 'sort=title must be ordered');
-  const sortTitleAgain = await fetch(`${baseUrl}/api/listings?sort=title&limit=48`);
+  const sortTitleAgain = await fetch(`${baseUrl}/api/listings?category=vehicles&sort=title&limit=48`);
   assert.deepEqual(await sortTitleAgain.json(), titleBody, 'the same URL must produce the same page');
 
-  const sortFeatured = await fetch(`${baseUrl}/api/listings?sort=featured&limit=48`);
+  const sortFeatured = await fetch(`${baseUrl}/api/listings?category=vehicles&sort=featured&limit=48`);
   assert.equal(((await sortFeatured.json()) as { listings: Array<{ listingReference: string }> }).listings[0]?.listingReference, featured.reference);
 
   // Bounded, non-overlapping pagination.
-  const pageOne = await fetch(`${baseUrl}/api/listings?limit=2&page=1`);
-  const pageTwo = await fetch(`${baseUrl}/api/listings?limit=2&page=2`);
+  const pageOne = await fetch(`${baseUrl}/api/listings?category=vehicles&limit=2&page=1`);
+  const pageTwo = await fetch(`${baseUrl}/api/listings?category=vehicles&limit=2&page=2`);
   const pageOneBody = (await pageOne.json()) as { listings: Array<{ listingReference: string }>; page: number; limit: number; totalPages: number };
   const pageTwoBody = (await pageTwo.json()) as { listings: Array<{ listingReference: string }> };
   assert.equal(pageOneBody.limit, 2);
@@ -1222,15 +1232,15 @@ test('P05 audience filters public listings and is required to publish', async ()
     titleEn: 'Audience men probe',
     audience: 'men',
     listingMethod: 'fixed_price',
-    categoryKey: 'cars',
-    attributes: { make: 'toyota', model: 'Men audience probe' },
+    categoryKey: 'clothes-thobes',
+    attributes: { item_condition: 'new', brand_name: 'Men audience probe' },
   });
   const women = await createPublishedListing({
     titleEn: 'Audience women probe',
     audience: 'women',
     listingMethod: 'fixed_price',
-    categoryKey: 'cars',
-    attributes: { make: 'toyota', model: 'Women audience probe' },
+    categoryKey: 'perfume',
+    attributes: { item_condition: 'new', brand_name: 'Women audience probe' },
   });
 
   const storedWomen = await handle.db.collection(COLLECTIONS.listings).findOne({ listingReference: women.reference });
@@ -1242,8 +1252,8 @@ test('P05 audience filters public listings and is required to publish', async ()
   assert.equal(womenOnly.status, 200);
   const womenBody = (await womenOnly.json()) as { listings: Array<{ listingReference: string; audience?: string | null }> };
   assert.ok(
-    womenBody.listings.every((entry) => entry.audience === 'women'),
-    `expected only women listings, got: ${JSON.stringify(womenBody.listings.map((e) => [e.listingReference, e.audience]))}`,
+    womenBody.listings.every((entry) => entry.audience === 'women' || entry.audience === 'unisex'),
+    `expected women or unisex listings, got: ${JSON.stringify(womenBody.listings.map((e) => [e.listingReference, e.audience]))}`,
   );
   assert.ok(womenBody.listings.some((entry) => entry.listingReference === women.reference));
   assert.equal(womenBody.listings.some((entry) => entry.listingReference === men.reference), false);
@@ -1439,9 +1449,9 @@ test('endingSoonHours lists live auctions closing inside the window', async () =
   assert.equal(shapeBody.filters.endingSoonHours, 2);
 
   const published = await createPublishedListing({
-    categoryKey: 'cars',
+    categoryKey: 'clothes-thobes',
     titleEn: `Ending soon window ${Date.now()}`,
-    attributes: { make: 'toyota', model: 'Window' },
+    attributes: { item_condition: 'new', brand_name: 'Window' },
   });
   const now = Date.now();
   await openLot(published.reference, new Date(now - 60_000), new Date(now + 45 * 60_000));

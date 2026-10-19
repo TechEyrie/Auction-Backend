@@ -1,7 +1,7 @@
 import type { Collection, Db } from 'mongodb';
 import { COLLECTIONS } from '../../db/indexes.ts';
 import { escapeRegex } from '../sellers/repository.ts';
-import { SUSPENDED_CATEGORY_ROOTS } from '../taxonomy/models.ts';
+import { CATALOGUE_ROOTS } from '../taxonomy/models.ts';
 import type { Audience, Condition, ListingDoc, ListingMethod, ListingWithId } from './models.ts';
 
 export type Paged<T> = { items: T[]; page: number; limit: number; total: number; totalPages: number };
@@ -95,16 +95,24 @@ export function buildPublicFilter(query: PublicListQuery): Record<string, unknow
   };
   if (query.categoryKeys && query.categoryKeys.length > 0) {
     // The path snapshot contains the category itself, so descendants match their parent key too.
-    filter.categoryPath = { $in: query.categoryKeys, $nin: [...SUSPENDED_CATEGORY_ROOTS] };
+    filter.categoryPath = { $in: query.categoryKeys };
   } else {
-    filter.categoryPath = { $nin: [...SUSPENDED_CATEGORY_ROOTS] };
+    filter.categoryPath = { $in: [...CATALOGUE_ROOTS] };
   }
   if (query.method) filter.listingMethod = query.method;
   if (query.condition) filter.condition = query.condition;
   if (query.countryCode) filter['location.countryCode'] = query.countryCode;
   if (query.cityKey) filter['location.cityKey'] = query.cityKey;
   if (query.featuredOnly) filter['featured.featured'] = true;
-  if (query.audience) filter.audience = query.audience;
+  if (query.audience) {
+    if (query.audience === 'men') {
+      filter.audience = { $in: ['men', 'unisex'] };
+    } else if (query.audience === 'women') {
+      filter.audience = { $in: ['women', 'unisex'] };
+    } else {
+      filter.audience = query.audience;
+    }
+  }
   if (query.listingReferences && query.listingReferences.length > 0) {
     filter.listingReference = { $in: query.listingReferences };
   }

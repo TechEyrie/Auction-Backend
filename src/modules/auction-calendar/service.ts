@@ -3,7 +3,7 @@ import { COLLECTIONS } from '../../db/indexes.ts';
 import { BUSINESS_TIMEZONE, toIsoUtc } from '../../shared/time.ts';
 import { qatarMonthUtcBounds } from '../../shared/qatarCalendar.ts';
 import { publicVisibilityFilter } from '../listings/repository.ts';
-import { SUSPENDED_CATEGORY_ROOTS } from '../taxonomy/models.ts';
+import { CATALOGUE_ROOTS } from '../taxonomy/models.ts';
 
 type Locale = 'en' | 'ar';
 
@@ -148,7 +148,7 @@ export async function getAuctionCalendar(
     .map(([date, groups]) => ({
       date,
       groups: groups
-        .filter((group) => !(SUSPENDED_CATEGORY_ROOTS as readonly string[]).includes(group.parentCategoryKey))
+        .filter((group) => (CATALOGUE_ROOTS as readonly string[]).includes(group.parentCategoryKey))
         .sort((left, right) => {
           const byEnd = left.endsAt.localeCompare(right.endsAt);
           if (byEnd !== 0) return byEnd;

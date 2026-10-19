@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildPublicFilter } from '../../src/modules/listings/repository.ts';
+import { CATALOGUE_ROOTS } from '../../src/modules/taxonomy/models.ts';
 
 test('buildPublicFilter keeps fixed_price when live auction refs are empty', () => {
   const filter = buildPublicFilter({
@@ -29,8 +30,18 @@ test('buildPublicFilter does not apply discovery clause unless live refs are pro
   assert.equal(filter.$and, undefined);
 });
 
-test('buildPublicFilter can narrow by shopper audience', () => {
+test('buildPublicFilter defaults catalogue paths to catalogue roots', () => {
+  const filter = buildPublicFilter({ sort: 'recent', page: 1, limit: 12 });
+  assert.deepEqual(filter.categoryPath, { $in: [...CATALOGUE_ROOTS] });
+});
+
+test('buildPublicFilter includes unisex when narrowing by women audience', () => {
   const filter = buildPublicFilter({ sort: 'recent', page: 1, limit: 12, audience: 'women' });
-  assert.equal(filter.audience, 'women');
+  assert.deepEqual(filter.audience, { $in: ['women', 'unisex'] });
   assert.equal(filter.status, 'published');
+});
+
+test('buildPublicFilter includes unisex when narrowing by men audience', () => {
+  const filter = buildPublicFilter({ sort: 'recent', page: 1, limit: 12, audience: 'men' });
+  assert.deepEqual(filter.audience, { $in: ['men', 'unisex'] });
 });

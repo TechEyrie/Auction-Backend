@@ -6,7 +6,7 @@ import { duplicateKeyIndex, isDuplicateKeyError } from '../../shared/mongoErrors
 import { recordAudit } from '../audit/repository.ts';
 import { COLLECTIONS } from '../../db/indexes.ts';
 import {
-  isSuspendedCategory,
+  isCatalogueCategory,
   MAX_CATEGORY_DEPTH,
   type CategoryDoc,
   type CategoryWithId,
@@ -305,7 +305,7 @@ export function createTaxonomyService(deps: TaxonomyDeps) {
     async list(includeInactive: boolean): Promise<CategoryWithId[]> {
       const filter = includeInactive ? {} : { active: true };
       const rows = await categories().find(filter).sort({ depth: 1, order: 1, key: 1 }).toArray();
-      return rows.filter((c) => !isSuspendedCategory(c.key, c.ancestors));
+      return rows.filter((c) => isCatalogueCategory(c.key, c.ancestors));
     },
 
     async getByKey(key: string): Promise<CategoryWithId | null> {
