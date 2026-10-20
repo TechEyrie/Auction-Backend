@@ -13,7 +13,7 @@ import { adminRouter } from './modules/admin/routes.ts';
 import { usersRouter } from './modules/users/routes.ts';
 import { csrfProtection, resolveAuth } from './modules/auth/middleware.ts';
 import { adminSellerRouter, publicSellerRouter } from './modules/sellers/routes.ts';
-import { adminTaxonomyRouter, publicTaxonomyRouter } from './modules/taxonomy/routes.ts';
+import { adminTaxonomyRouter, publicCategoryIconsRouter, publicTaxonomyRouter } from './modules/taxonomy/routes.ts';
 import { adminAttributeRouter, publicAttributeRouter } from './modules/attributes/routes.ts';
 import { adminLocationRouter, publicLocationRouter } from './modules/locations/routes.ts';
 import { adminMediaRouter } from './modules/media/routes.ts';
@@ -67,6 +67,7 @@ export function createApp(deps: AppDeps): Express {
 
   // Public catalog reads: the same records the admin edits (no second source of truth).
   app.use('/api/catalog/categories', publicTaxonomyRouter(catalogDeps));
+  app.use('/api/catalog/category-icons', publicCategoryIconsRouter());
   app.use('/api/catalog/locations', publicLocationRouter(locationDeps));
   app.use('/api/catalog/sellers', publicSellerRouter(locationDeps));
   app.use('/api/catalog/attribute-schemas', publicAttributeRouter(catalogDeps));

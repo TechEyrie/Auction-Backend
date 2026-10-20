@@ -5,6 +5,7 @@ import { AppError, conflict, notFound } from '../../shared/errors.ts';
 import { duplicateKeyIndex, isDuplicateKeyError } from '../../shared/mongoErrors.ts';
 import { recordAudit } from '../audit/repository.ts';
 import { COLLECTIONS } from '../../db/indexes.ts';
+import { DEFAULT_CATEGORY_ICON } from './icons.ts';
 import {
   isCatalogueCategory,
   MAX_CATEGORY_DEPTH,
@@ -26,7 +27,7 @@ export type CategoryInput = {
   nameAr?: string | null;
   descriptionEn?: string | null;
   descriptionAr?: string | null;
-  icon?: string | null;
+  icon?: string;
   order?: number;
   active?: boolean;
   listingMethods: ListingMethod[];
@@ -113,7 +114,7 @@ export function createTaxonomyService(deps: TaxonomyDeps) {
             en: { name: input.nameEn.trim(), description: input.descriptionEn?.trim() ?? null },
             ar: input.nameAr ? { name: input.nameAr.trim(), description: input.descriptionAr?.trim() ?? null } : null,
           },
-          icon: input.icon ?? null,
+          icon: input.icon ?? DEFAULT_CATEGORY_ICON,
           order: input.order ?? 0,
           active: input.active ?? true,
           listingMethods: methods,

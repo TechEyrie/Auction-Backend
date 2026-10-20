@@ -64,6 +64,7 @@ export type PublicListQuery = {
   condition?: Condition;
   countryCode?: string;
   cityKey?: string;
+  areaKey?: string;
   featuredOnly?: boolean;
   audience?: Audience;
   sort: PublicSort;
@@ -103,6 +104,7 @@ export function buildPublicFilter(query: PublicListQuery): Record<string, unknow
   if (query.condition) filter.condition = query.condition;
   if (query.countryCode) filter['location.countryCode'] = query.countryCode;
   if (query.cityKey) filter['location.cityKey'] = query.cityKey;
+  if (query.areaKey) filter['location.areaKey'] = query.areaKey;
   if (query.featuredOnly) filter['featured.featured'] = true;
   if (query.audience) {
     if (query.audience === 'men') {

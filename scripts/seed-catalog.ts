@@ -5,6 +5,7 @@ import { createAttributeService } from '../src/modules/attributes/service.ts';
 import { createLocationService } from '../src/modules/locations/service.ts';
 import type { AttributeField } from '../src/modules/attributes/models.ts';
 import type { ListingMethod } from '../src/modules/taxonomy/models.ts';
+import { backfillCategoryIcons } from '../src/modules/taxonomy/backfillCategoryIcons.ts';
 
 const METHODS: ListingMethod[] = ['auction', 'fixed_price', 'enquiry'];
 
@@ -97,10 +98,10 @@ export const LOCATION_SEED: Array<{
   publicPrecision?: 'city' | 'area' | 'exact';
   order?: number;
 }> = [
-  { countryCode: 'QA', cityKey: 'doha', areaKey: 'al-sadd', labelEn: 'Al Sadd, Doha', labelAr: 'السد، الدوحة', coordinates: { lat: 25.2762, lng: 51.5076 }, order: 1 },
-  { countryCode: 'QA', cityKey: 'doha', areaKey: 'west-bay', labelEn: 'West Bay, Doha', labelAr: 'الخليج الغربي، الدوحة', coordinates: { lat: 25.3206, lng: 51.5294 }, order: 2 },
-  { countryCode: 'QA', cityKey: 'doha', areaKey: 'the-pearl', labelEn: 'The Pearl, Doha', labelAr: 'اللؤلؤة، الدوحة', coordinates: { lat: 25.3722, lng: 51.5514 }, order: 3 },
-  { countryCode: 'QA', cityKey: 'lusail', areaKey: 'marina', labelEn: 'Lusail Marina', labelAr: 'مرسى لوسيل', coordinates: { lat: 25.4349, lng: 51.4906 }, order: 4 },
+  { countryCode: 'QA', cityKey: 'doha', areaKey: 'al-sadd', labelEn: 'Al Sadd, Doha', labelAr: 'السد، الدوحة', coordinates: { lat: 25.2762, lng: 51.5076 }, publicPrecision: 'area', order: 1 },
+  { countryCode: 'QA', cityKey: 'doha', areaKey: 'west-bay', labelEn: 'West Bay, Doha', labelAr: 'الخليج الغربي، الدوحة', coordinates: { lat: 25.3206, lng: 51.5294 }, publicPrecision: 'area', order: 2 },
+  { countryCode: 'QA', cityKey: 'doha', areaKey: 'the-pearl', labelEn: 'The Pearl, Doha', labelAr: 'اللؤلؤة، الدوحة', coordinates: { lat: 25.3722, lng: 51.5514 }, publicPrecision: 'area', order: 3 },
+  { countryCode: 'QA', cityKey: 'lusail', areaKey: 'marina', labelEn: 'Lusail Marina', labelAr: 'مرسى لوسيل', coordinates: { lat: 25.4349, lng: 51.4906 }, publicPrecision: 'area', order: 4 },
   { countryCode: 'QA', cityKey: 'al-wakrah', areaKey: 'city-centre', labelEn: 'Al Wakrah', labelAr: 'الوكرة', order: 5 },
 ];
 
@@ -134,7 +135,7 @@ export async function seedCatalog(deps: {
         nameEn: seed.nameEn,
         nameAr: seed.nameAr,
         descriptionEn: seed.descriptionEn ?? null,
-        icon: seed.icon ?? null,
+        icon: seed.icon,
         order: seed.order,
         active: true,
         listingMethods: METHODS,
@@ -178,6 +179,8 @@ export async function seedCatalog(deps: {
     );
     summary.locationsCreated += 1;
   }
+
+  await backfillCategoryIcons(deps.db);
 
   return summary;
 }

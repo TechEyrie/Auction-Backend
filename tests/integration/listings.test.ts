@@ -50,6 +50,7 @@ const world = {
   inactiveLocation: 'qa-alwakrah-alwakrah',
   cityLocation: 'qa-doha-doha',
   areaLocation: 'qa-doha-al-sadd',
+  westBayLocation: 'qa-doha-west-bay',
 };
 
 before(async () => {
@@ -126,6 +127,7 @@ before(async () => {
   world.changeVersion = await publishSchema('change-cat', [{ key: 'spec', type: 'text', labelEn: 'Specification' }]);
 
   await createLocation({ countryCode: 'QA', cityKey: 'doha', areaKey: 'al-sadd', labelEn: 'Al Sadd, Doha', publicPrecision: 'area' });
+  await createLocation({ countryCode: 'QA', cityKey: 'doha', areaKey: 'west-bay', labelEn: 'West Bay, Doha', publicPrecision: 'area' });
   await createLocation({ countryCode: 'QA', cityKey: 'doha', areaKey: 'doha', labelEn: 'Doha', publicPrecision: 'city' });
   await createLocation({ countryCode: 'QA', cityKey: 'alwakrah', areaKey: 'alwakrah', labelEn: 'Al Wakrah', publicPrecision: 'city' });
 });
@@ -1067,10 +1069,18 @@ test('P05-E07 discovery filters, sorts and paginates deterministically', async (
     image: jpeg(40, 30),
     imageType: 'image/jpeg',
   });
+  const westBayListing = await createPublishedListing({
+    categoryKey: 'cars',
+    titleEn: 'West Bay coupe',
+    listingMethod: 'auction',
+    locationKey: world.westBayLocation,
+    attributes: { make: 'nissan', model: 'Coupe' },
+  });
 
   const discoveryNow = Date.now();
   await openLot(sedan.reference, new Date(discoveryNow - 60_000), new Date(discoveryNow + 3_600_000));
   await openLot(jpegListing.reference, new Date(discoveryNow - 60_000), new Date(discoveryNow + 3_600_000));
+  await openLot(westBayListing.reference, new Date(discoveryNow - 60_000), new Date(discoveryNow + 3_600_000));
 
   const catalogueDefault = await fetch(`${baseUrl}/api/listings?limit=48`);
   const catalogueRefs = ((await catalogueDefault.json()) as { listings: Array<{ listingReference: string }> }).listings.map((entry) => entry.listingReference);
@@ -1116,6 +1126,21 @@ test('P05-E07 discovery filters, sorts and paginates deterministically', async (
   assert.ok(cityRefs.includes(sedan.reference), 'a city filter includes every listing in that city');
   assert.ok(cityBody.listings.every((entry) => entry.location.cityKey === 'doha'), 'a city filter must not leak other cities’ listings');
   assert.ok(!cityRefs.includes(enquiry.reference), 'a listing with no location is not in any city');
+  assert.ok(cityRefs.includes(westBayListing.reference), 'a city filter includes every Doha area');
+
+  const alSaddArea = await fetch(`${baseUrl}/api/listings?category=vehicles&country=QA&city=doha&area=al-sadd&limit=48`);
+  const alSaddBody = (await alSaddArea.json()) as { listings: Array<{ listingReference: string }>; filters: { area: string | null } };
+  assert.equal(alSaddBody.filters.area, 'al-sadd');
+  assert.deepEqual(
+    alSaddBody.listings.map((entry) => entry.listingReference),
+    [sedan.reference],
+    'area=al-sadd must return only that neighbourhood',
+  );
+
+  const westBayArea = await fetch(`${baseUrl}/api/listings?category=vehicles&country=QA&city=doha&area=west-bay&limit=48`);
+  const westBayBody = (await westBayArea.json()) as { listings: Array<{ listingReference: string }>; filters: { area: string | null } };
+  assert.equal(westBayBody.filters.area, 'west-bay');
+  assert.deepEqual(westBayBody.listings.map((entry) => entry.listingReference), [westBayListing.reference]);
 
   const featuredOnly = await fetch(`${baseUrl}/api/listings?category=vehicles&featured=true&limit=48`);
   const featuredRefs = ((await featuredOnly.json()) as { listings: Array<{ listingReference: string; featured: boolean }> }).listings;

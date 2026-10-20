@@ -283,6 +283,7 @@ export const openApiDocument: OpenApiDocument = {
           { name: 'method', in: 'query', schema: { type: 'string', enum: ['auction', 'fixed_price', 'enquiry'] } },
           { name: 'condition', in: 'query', schema: { type: 'string' } },
           { name: 'city', in: 'query', schema: { type: 'string' } },
+          { name: 'area', in: 'query', schema: { type: 'string' } },
           { name: 'featured', in: 'query', schema: { type: 'string', enum: ['true'] } },
           { name: 'sort', in: 'query', schema: { type: 'string', enum: ['recent', 'title', 'featured'] } },
           { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },

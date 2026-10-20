@@ -87,12 +87,11 @@ export function assertCoordinates(point: { lat: number; lng: number } | null | u
 
 /** Apply the precision policy. Exact coordinates require an explicit `exact` opt-in. */
 export function toPublicLocationDto(location: LocationDoc): PublicLocationDto {
-  const showArea = location.publicPrecision === 'area' || location.publicPrecision === 'exact';
   return {
     key: location.key,
     countryCode: location.countryCode,
     cityKey: location.cityKey,
-    areaKey: showArea ? location.areaKey : null,
+    areaKey: location.areaKey,
     label: location.labels.en,
     coordinates: location.publicPrecision === 'exact' ? location.point?.coordinates ?? null : null,
   };

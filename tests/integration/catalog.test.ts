@@ -348,6 +348,46 @@ test('D03 competing hierarchy edits cannot create a cycle', async () => {
   assert.equal(stored.every((doc) => doc.depth <= 4), true);
 });
 
+test('D03 category icons are validated and exposed publicly', async () => {
+  const iconsRes = await fetch(`${baseUrl}/api/catalog/category-icons`);
+  assert.equal(iconsRes.status, 200);
+  const iconsBody = (await iconsRes.json()) as { icons: Array<{ key: string; label: string }> };
+  assert.ok(iconsBody.icons.some((entry) => entry.key === 'watches'));
+
+  const badIcon = await admin.post('/api/admin/categories', {
+    key: 'bad-icon-cat',
+    parentKey: null,
+    nameEn: 'Bad icon',
+    listingMethods: ['auction'],
+    icon: 'nope',
+  });
+  assert.equal(badIcon.status, 422);
+
+  const watchesRoot = await admin.post('/api/admin/categories', {
+    key: 'watches',
+    parentKey: null,
+    nameEn: 'Watches catalogue',
+    listingMethods: ['auction', 'fixed_price'],
+    icon: 'watches',
+  });
+  assert.equal(watchesRoot.status, 201, JSON.stringify(watchesRoot.body));
+
+  const child = await admin.post('/api/admin/categories', {
+    key: 'watch-styles',
+    parentKey: 'watches',
+    nameEn: 'Watch styles',
+    listingMethods: ['auction'],
+    icon: 'watches',
+  });
+  assert.equal(child.status, 201, JSON.stringify(child.body));
+
+  const publicTree = await fetch(`${baseUrl}/api/catalog/categories`);
+  const publicCategories = (await publicTree.json() as { categories: Array<{ key: string; icon: string | null }> }).categories;
+  const styled = publicCategories.find((c) => c.key === 'watch-styles');
+  assert.ok(styled, 'catalogue child must appear in public taxonomy');
+  assert.equal(styled!.icon, 'watches');
+});
+
 test('D03 archiving is reversible and refuses to strand active children', async () => {
   await admin.post('/api/admin/categories', { key: 'archive-root', parentKey: null, nameEn: 'Archive root', listingMethods: ['auction'] });
   await admin.post('/api/admin/categories', { key: 'archive-child', parentKey: 'archive-root', nameEn: 'Archive child', listingMethods: ['auction'] });
@@ -530,7 +570,7 @@ test('D07 locations validate identifiers and coordinates and apply public precis
   assert.equal(publicList.status, 200);
   const entry = (await publicList.json() as { locations: Array<{ key: string; areaKey: string | null; coordinates: unknown }> }).locations.find((l) => l.key === 'qa-doha-al-sadd');
   assert.ok(entry);
-  assert.equal(entry!.areaKey, null, 'city precision hides the area');
+  assert.equal(entry!.areaKey, 'al-sadd', 'catalog identity keeps areaKey at city precision');
   assert.equal(entry!.coordinates, null, 'exact coordinates are not published by default');
 
   const exact = await admin.post('/api/admin/locations', {

@@ -4,7 +4,10 @@ import { parseInput } from '../../shared/validate.ts';
 import { requireCapability } from '../auth/middleware.ts';
 import { LISTING_METHODS } from './models.ts';
 import { toAdminCategoryDto, toPublicCategoryDto } from './dto.ts';
+import { CATEGORY_ICON_KEYS, CATEGORY_ICONS } from './icons.ts';
 import { createTaxonomyService, type TaxonomyDeps } from './service.ts';
+
+const categoryIconSchema = z.enum(CATEGORY_ICON_KEYS);
 
 const writeSchema = z.object({
   key: z.string().min(2).max(60),
@@ -13,18 +16,29 @@ const writeSchema = z.object({
   nameAr: z.string().max(120).optional().nullable(),
   descriptionEn: z.string().max(500).optional().nullable(),
   descriptionAr: z.string().max(500).optional().nullable(),
-  icon: z.string().max(60).optional().nullable(),
+  icon: categoryIconSchema.optional().default('tag'),
   order: z.coerce.number().int().min(0).max(9999).optional(),
   active: z.boolean().optional(),
   listingMethods: z.array(z.enum(LISTING_METHODS)).min(1),
 });
 
 const patchSchema = writeSchema.partial().extend({
+  icon: categoryIconSchema.optional(),
   /** Optimistic concurrency: the version the editor loaded. */
   expectedHierarchyVersion: z.coerce.number().int().min(1).optional(),
 });
 
 const reasonSchema = z.object({ reason: z.string().min(3).max(300) });
+
+/** Public icon catalogue for admin pickers and documentation. */
+export function publicCategoryIconsRouter(): Router {
+  const router = Router();
+  router.get('/', (_req, res) => {
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.json({ icons: CATEGORY_ICONS });
+  });
+  return router;
+}
 
 /** Public taxonomy: active categories only. The same records the admin edits. */
 export function publicTaxonomyRouter(deps: TaxonomyDeps): Router {
