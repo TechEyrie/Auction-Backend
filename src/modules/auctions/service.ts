@@ -59,6 +59,21 @@ function bidderLabel(userReference: string): string {
   return `Bidder ${digest}`;
 }
 
+async function displayNamesByUserRef(db: Db, refs: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(refs.filter(Boolean))];
+  if (unique.length === 0) return new Map();
+  const users = await db
+    .collection<Pick<UserDoc, 'publicReference' | 'fullName'>>(COLLECTIONS.users)
+    .find({ publicReference: { $in: unique } })
+    .project({ publicReference: 1, fullName: 1 })
+    .toArray();
+  return new Map(
+    users
+      .map((user) => [user.publicReference, (user.fullName ?? '').trim()] as const)
+      .filter((entry) => entry[1].length > 0),
+  );
+}
+
 function money(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     throw new AppError('VALIDATION_ERROR', 'Amount must be a non-negative integer in minor units', {
@@ -385,7 +400,8 @@ export function createAuctionService(deps: { db: Db; withTransaction: Tx }) {
         ? await bids().find(query).sort({ amountMinor: -1, sequence: -1 }).limit(limit).toArray()
         : await bids().find(query).sort({ sequence: -1 }).limit(limit).toArray();
       const viewerReference = options?.viewerReference;
-      return rows.map((bid) => toPublicBidRow(bid, viewerReference));
+      const names = await displayNamesByUserRef(deps.db, rows.map((row) => row.userReference));
+      return rows.map((bid) => toPublicBidRow(bid, viewerReference, names.get(bid.userReference)));
     },
 
     get: publicView,
@@ -426,10 +442,10 @@ export type PublicBidRow = {
   isMine?: boolean;
 };
 
-function toPublicBidRow(bid: BidDoc, viewerReference?: string): PublicBidRow {
+function toPublicBidRow(bid: BidDoc, viewerReference?: string, displayName?: string): PublicBidRow {
   const row: PublicBidRow = {
     sequence: bid.sequence,
-    bidderLabel: bid.bidderLabel,
+    bidderLabel: displayName?.trim() || bid.bidderLabel,
     amountMinor: bid.amountMinor,
     acceptedAt: bid.acceptedAt.toISOString(),
   };

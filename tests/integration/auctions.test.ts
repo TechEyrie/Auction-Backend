@@ -164,7 +164,7 @@ test('public auction GET links listing and recent bids', async () => {
   const top = view.body.auction.recentBids[0];
   assert.ok(top);
   assert.equal(top.amountMinor, 10000);
-  assert.match(top.bidderLabel, /^Bidder /);
+  assert.equal(top.bidderLabel, 'Auction Customer');
   assert.equal(top.isMine, true);
   assert.equal(JSON.stringify(view.body).includes('userReference'), false);
 });
