@@ -53,16 +53,26 @@ async function loginCustomerClient(identifier: string, password: string): Promis
   return client;
 }
 
-async function registerClient(phone: string, password = FIXTURE_PW): Promise<TestClient> {
+function fixtureEmail(phone: string): string {
+  return `c${phone.replace(/\D/g, '')}@example.test`;
+}
+
+async function registerClient(phone: string, password = FIXTURE_PW, options?: { skipVerify?: boolean }): Promise<TestClient> {
   const client = new TestClient(baseUrl);
   await client.bootstrap();
   const res = await client.post('/api/auth/register', {
     fullName: `Customer ${phone}`,
     phone,
+    email: fixtureEmail(phone),
     password,
     termsAccepted: true,
   });
   assert.equal(res.status, 201, `register failed for ${phone}: ${JSON.stringify(res.body)}`);
+  if (!options?.skipVerify) {
+    const token = (res.body as { devVerifyToken?: string }).devVerifyToken;
+    assert.ok(token, 'devVerifyToken missing from register response');
+    assert.equal((await client.post('/api/auth/email/verify', { token })).status, 200);
+  }
   return client;
 }
 
@@ -125,11 +135,13 @@ test('C01 register, session reload, logout and login round-trip', async () => {
   const reg = await client.post('/api/auth/register', {
     fullName: 'Noor Al Ali',
     phone: '55551234',
+    email: 'noor.roundtrip@example.test',
     password: 'correct horse 1',
     termsAccepted: true,
   });
   assert.equal(reg.status, 201);
-  assert.equal((reg.body as { user: { roles: string[] } }).user.roles[0], 'customer');
+  assert.equal((reg.body as { user: { roles: string[]; emailVerified: boolean } }).user.roles[0], 'customer');
+  assert.equal((reg.body as { user: { emailVerified: boolean } }).user.emailVerified, false);
 
   const session = await client.get('/api/auth/session');
   assert.equal((session.body as { user: { phone: string } }).user.phone, '+97455551234');
@@ -170,6 +182,7 @@ test('register refuses common and short passwords', async () => {
   const short = await client.post('/api/auth/register', {
     fullName: 'Weak Pass User',
     phone: '55550080',
+    email: 'weak.short@example.test',
     password: 'letmein1',
     termsAccepted: true,
   });
@@ -198,6 +211,7 @@ test('C05 public role/status/verification injection is rejected', async () => {
   const reg = await client.post('/api/auth/register', {
     fullName: 'Role Check User',
     phone: '55550011',
+    email: 'role.check@example.test',
     password: 'inject me please',
     termsAccepted: true,
     roles: ['super_admin'],
@@ -251,6 +265,7 @@ test('C08 password reset is generic, single-use, expiring, and revokes sessions'
   await client.post('/api/auth/register', {
     fullName: 'Reset Fixture',
     phone: '55550013',
+    email: 'reset.fixture@example.test',
     password: 'original pass 1',
     termsAccepted: true,
   });
@@ -403,6 +418,43 @@ test('C12 admin bootstrap is one-time and MFA gates privileged access', async ()
     const reuse = await loginClient(SUPER_PHONE, SUPER_PW);
     assert.equal((await reuse.post('/api/auth/mfa/recovery', { code: recoveryCode })).status, 422);
   });
+});
+
+test('register without email is rejected', async () => {
+  const client = new TestClient(baseUrl);
+  await client.bootstrap();
+  const res = await client.post('/api/auth/register', {
+    fullName: 'No Email User',
+    phone: '55550090',
+    password: 'no email user 1',
+    termsAccepted: true,
+  });
+  assert.equal(res.status, 422);
+  assert.equal((res.body as { error: { fieldErrors: { email?: string } } }).error.fieldErrors.email, 'required');
+});
+
+test('email verification is single-use and gates MFA enrollment', async () => {
+  const client = await registerClient('55550091', FIXTURE_PW, { skipVerify: true });
+  const reg = await client.get('/api/auth/session');
+  assert.equal((reg.body as { user: { emailVerified: boolean } }).user?.emailVerified, false);
+
+  const blocked = await client.post('/api/auth/mfa/enroll', {});
+  assert.equal(blocked.status, 403);
+  assert.equal(
+    (blocked.body as { error: { details: { reason: string } } }).error.details.reason,
+    'EMAIL_NOT_VERIFIED',
+  );
+
+  const resend = await client.post('/api/auth/email/resend', {});
+  assert.equal(resend.status, 200);
+  const verifyToken = (resend.body as { devVerifyToken?: string }).devVerifyToken;
+  assert.ok(verifyToken);
+  assert.equal((await client.post('/api/auth/email/verify', { token: verifyToken })).status, 200);
+  const verifiedSession = await client.get('/api/auth/session');
+  assert.equal((verifiedSession.body as { user: { emailVerified: boolean } }).user.emailVerified, true);
+  assert.equal((await client.post('/api/auth/email/verify', { token: verifyToken })).status, 200);
+  assert.equal((await client.post('/api/auth/email/verify', { token: 'not-a-real-token' })).status, 422);
+  assert.equal((await client.post('/api/auth/mfa/enroll', {})).status, 200);
 });
 
 test('C14 customer MFA is mandatory on login and gates account until enrolled', async () => {

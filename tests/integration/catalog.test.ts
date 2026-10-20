@@ -22,7 +22,7 @@ const ADMIN_PHONE = '55554000';
 const ADMIN_PW = 'catalog admin pw 1';
 const BOOTSTRAP_TOKEN = 'catalog-integration-token';
 const CUSTOMER_PHONE = '55554001';
-const CUSTOMER_PW = 'catalog customer pw 1';
+const CUSTOMER_PW = 'Qw9!xrTpm7k';
 
 before(async () => {
   replSet = await createReplSet();

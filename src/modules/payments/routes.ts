@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { AppConfig } from '../../config/index.ts';
 import { AppError } from '../../shared/errors.ts';
 import { parseInput } from '../../shared/validate.ts';
-import { requireActiveUser, requireAuth, requireCapability, requireMfa } from '../auth/middleware.ts';
+import { requireActiveUser, requireAuth, requireCapability, requireEmailVerified, requireMfa } from '../auth/middleware.ts';
 import { COLLECTIONS } from '../../db/indexes.ts';
 import {
   applyVerifiedPayment,
@@ -28,7 +28,7 @@ const webhookSchema = z.object({
 export function paymentRouter(deps: { db: Db; config: AppConfig }): Router {
   const router = Router();
 
-  router.post('/complete', requireAuth(), requireActiveUser(), requireMfa(), async (req, res, next) => {
+  router.post('/complete', requireAuth(), requireActiveUser(), requireEmailVerified(), requireMfa(), async (req, res, next) => {
     try {
       if (deps.config.isProduction) {
         throw new AppError('FORBIDDEN', 'The manual payment placeholder is rejected in production');

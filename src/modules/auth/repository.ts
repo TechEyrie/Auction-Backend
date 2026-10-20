@@ -56,6 +56,10 @@ export async function updateUserPasswordHash(db: Db, id: ObjectId, passwordHash:
   await users(db).updateOne({ _id: id }, { $set: { passwordHash, updatedAt: new Date() } });
 }
 
+export async function updateUserEmailVerified(db: Db, id: ObjectId, emailVerifiedAt: Date): Promise<void> {
+  await users(db).updateOne({ _id: id }, { $set: { emailVerifiedAt, updatedAt: new Date() } });
+}
+
 export async function updateUserRoles(db: Db, id: ObjectId, roles: Role[]): Promise<void> {
   await users(db).updateOne({ _id: id }, { $set: { roles, updatedAt: new Date() } });
 }

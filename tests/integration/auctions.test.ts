@@ -12,6 +12,8 @@ import { generateTotp } from '../../src/shared/totp.ts';
 import { satisfyCustomerMfa } from '../helpers/authFixture.ts';
 import { io, type Socket } from 'socket.io-client';
 import { signPaymentBody } from '../../src/modules/orders/service.ts';
+import { MAIL_JOB_TYPES } from '../../src/modules/mail/jobs.ts';
+import { processMailJobs } from '../../src/modules/mail/processJobs.ts';
 
 let handle: DbHandle;
 let running: RunningServer;
@@ -52,14 +54,22 @@ before(async () => {
   if (confirm.status !== 200) throw new Error(`admin confirm failed: ${JSON.stringify(confirm.body)}`);
   const auth = createAuthService({ db: handle.db, config, logger: silentLogger() });
   const ctx = { ip: null, userAgent: null };
-  await auth.register({ fullName: 'Auction Customer', phone: '55557001', password: 'auction customer pw 1', termsAccepted: true }, ctx);
-  await auth.register({ fullName: 'Auction Customer 2', phone: '55557002', password: 'auction customer pw 2', termsAccepted: true }, ctx);
+  const reg1 = await auth.register(
+    { fullName: 'Auction Customer', phone: '55557001', email: 'bidder.55557001@example.test', password: 'z9hybridpw57', termsAccepted: true },
+    ctx,
+  );
+  await auth.verifyEmail(reg1.verifyToken);
+  const reg2 = await auth.register(
+    { fullName: 'Auction Customer 2', phone: '55557002', email: 'bidder.55557002@example.test', password: 'z9hybridpw58', termsAccepted: true },
+    ctx,
+  );
+  await auth.verifyEmail(reg2.verifyToken);
   customer = new TestClient(baseUrl);
   other = new TestClient(baseUrl);
   await customer.bootstrap();
   await other.bootstrap();
-  const c1 = await customer.post('/api/auth/login', { identifier: '55557001', password: 'auction customer pw 1' });
-  const c2 = await other.post('/api/auth/login', { identifier: '55557002', password: 'auction customer pw 2' });
+  const c1 = await customer.post('/api/auth/login', { identifier: '55557001', password: 'z9hybridpw57' });
+  const c2 = await other.post('/api/auth/login', { identifier: '55557002', password: 'z9hybridpw58' });
   if (c1.status !== 200 || c2.status !== 200) throw new Error('customer login failed');
   await satisfyCustomerMfa(customer);
   await satisfyCustomerMfa(other);
@@ -474,6 +484,61 @@ test('I01-I12 finance summary is platform revenue; seller settlements disabled',
   const after = await admin.get<{ collectedRevenueMinor: number; unsettledPayableMinor: number }>('/api/admin/finance/summary');
   assert.ok(after.body.collectedRevenueMinor >= before + 15000);
   assert.equal(after.body.unsettledPayableMinor, 0);
+});
+
+test('auction create enqueues lot-ending mail job at endsAt minus 30 minutes', async () => {
+  const endsInMs = 40 * 60 * 1000;
+  const createdAt = Date.now();
+  const created = await admin.post<{ auction: { lotReference: string } }>('/api/admin/auctions', {
+    listingReference: 'l_test',
+    startingBidMinor: 10000,
+    incrementMinor: 500,
+    startsAt: new Date(createdAt - 1000).toISOString(),
+    endsAt: new Date(createdAt + endsInMs).toISOString(),
+  });
+  assert.equal(created.status, 201);
+  const lot = created.body.auction.lotReference;
+  const job = await handle.db.collection(COLLECTIONS.durableJobs).findOne({
+    type: MAIL_JOB_TYPES.lotEnding,
+    key: lot,
+  });
+  assert.ok(job);
+  const expectedRunAfter = createdAt + endsInMs - 30 * 60 * 1000;
+  assert.ok(Math.abs(job.runAfter.getTime() - expectedRunAfter) < 5000);
+});
+
+test('auction close with winner enqueues won and action mail jobs; processor succeeds', async () => {
+  const { lot, version } = await openAuction(60_000);
+  const bid = await customer.post(`/api/auctions/${lot}/bids`, { amountMinor: 10000, expectedVersion: version });
+  assert.equal(bid.status, 201);
+  const closed = await admin.post<{ auction: { orderReference: string } }>(
+    `/api/admin/auctions/${lot}/close`,
+    { reason: 'deadline', confirm: true },
+  );
+  assert.equal(closed.status, 200);
+  const auction = await handle.db.collection(COLLECTIONS.auctions).findOne({ lotReference: lot });
+  assert.ok(auction?.closedAt);
+  const jobs = await handle.db.collection(COLLECTIONS.durableJobs)
+    .find({ key: lot, type: { $in: [MAIL_JOB_TYPES.winnerWon, MAIL_JOB_TYPES.winnerAction] } })
+    .toArray();
+  assert.equal(jobs.length, 2);
+  const won = jobs.find((row) => row.type === MAIL_JOB_TYPES.winnerWon);
+  const action = jobs.find((row) => row.type === MAIL_JOB_TYPES.winnerAction);
+  assert.ok(won && action);
+  assert.equal(won.payload.orderReference, `ord_${lot}`);
+  const closedAt = auction.closedAt as Date;
+  assert.ok(Math.abs(won.runAfter.getTime() - closedAt.getTime()) < 5000);
+  assert.ok(Math.abs(action.runAfter.getTime() - (closedAt.getTime() + 60 * 60 * 1000)) < 5000);
+  await handle.db.collection(COLLECTIONS.durableJobs).updateMany(
+    { jobId: { $in: [won.jobId, action.jobId] } },
+    { $set: { runAfter: new Date(0) } },
+  );
+  const processed = await processMailJobs({ db: handle.db, config, owner: 'auction-mail-test' });
+  assert.ok(processed >= 2);
+  const wonAfter = await handle.db.collection(COLLECTIONS.durableJobs).findOne({ jobId: won.jobId });
+  const actionAfter = await handle.db.collection(COLLECTIONS.durableJobs).findOne({ jobId: action.jobId });
+  assert.equal(wonAfter?.state, 'succeeded');
+  assert.equal(actionAfter?.state, 'succeeded');
 });
 
 test('J01-J12 account, enquiry, and published terms', async () => {

@@ -29,10 +29,11 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     const auth = createAuthService({ db: db.db, config, logger });
     let user = await repo.findUserByIdentifier(db.db, email);
     if (!user) {
-      await auth.register(
+      const created = await auth.register(
         { fullName: 'Development operator', email, password, termsAccepted: true },
         { ip: null, userAgent: 'grant-dev-operator' },
       );
+      if (created.verifyToken) await auth.verifyEmail(created.verifyToken);
       user = await repo.findUserByIdentifier(db.db, email);
     }
     if (!user) throw new Error('Operator account was not created');

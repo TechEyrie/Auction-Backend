@@ -44,6 +44,11 @@ export async function createAdminFixture(options: {
   return { client, phone: options.phone, password: options.password, publicReference: user.publicReference };
 }
 
+export async function verifyCustomerEmail(client: TestClient, devVerifyToken: string): Promise<void> {
+  const res = await client.post('/api/auth/email/verify', { token: devVerifyToken });
+  if (res.status !== 200) throw new Error(`email verify failed: ${JSON.stringify(res.body)}`);
+}
+
 /** Enroll and confirm TOTP so customer-only MFA gates pass. */
 export async function satisfyCustomerMfa(client: TestClient): Promise<string> {
   const enroll = await client.post('/api/auth/mfa/enroll', {});
@@ -66,10 +71,14 @@ export async function createCustomerFixture(options: {
   const register = await client.post('/api/auth/register', {
     fullName: `Catalog Customer ${options.phone}`,
     phone: options.phone,
+    email: `fixture.${options.phone.replace(/\D/g, '')}@example.test`,
     password: options.password,
     termsAccepted: true,
   });
   if (register.status !== 201) throw new Error(`customer fixture failed: ${JSON.stringify(register.body)}`);
+  const devVerifyToken = (register.body as { devVerifyToken?: string }).devVerifyToken;
+  if (!devVerifyToken) throw new Error('customer fixture missing devVerifyToken');
+  await verifyCustomerEmail(client, devVerifyToken);
   await satisfyCustomerMfa(client);
   return client;
 }

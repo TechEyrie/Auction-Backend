@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Collection, Db } from 'mongodb';
+import type { ClientSession, Collection, Db } from 'mongodb';
 import { COLLECTIONS } from '../../db/indexes.ts';
 
 export type JobState = 'pending' | 'running' | 'succeeded' | 'failed';
@@ -27,6 +27,8 @@ export type EnqueueJobInput = {
   payload?: Record<string, unknown>;
   runAfter?: Date;
   maxAttempts?: number;
+  /** When the `(type, key)` job already exists, update `runAfter` (and payload when supplied). */
+  reschedule?: boolean;
 };
 
 function collection(db: Db): Collection<DurableJobDoc> {
@@ -37,30 +39,37 @@ function collection(db: Db): Collection<DurableJobDoc> {
  * Idempotent enqueue: `(type, key)` is unique, so re-enqueueing the same logical
  * job returns the existing job instead of creating a duplicate.
  */
-export async function enqueueJob(db: Db, input: EnqueueJobInput): Promise<string> {
+export async function enqueueJob(db: Db, input: EnqueueJobInput, session?: ClientSession): Promise<string> {
   const now = new Date();
   const jobId = randomUUID();
+  const update: Record<string, unknown> = {
+    $setOnInsert: {
+      jobId,
+      type: input.type,
+      key: input.key,
+      state: 'pending' as JobState,
+      payload: input.payload ?? {},
+      runAfter: input.runAfter ?? now,
+      attempts: 0,
+      maxAttempts: input.maxAttempts ?? 5,
+      leaseOwner: null,
+      leaseUntil: null,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+      lastError: null,
+    },
+  };
+  if (input.reschedule) {
+    const set: Record<string, unknown> = { updatedAt: now };
+    if (input.runAfter) set.runAfter = input.runAfter;
+    if (input.payload) set.payload = input.payload;
+    if (Object.keys(set).length > 1) update.$set = set;
+  }
   const doc = await collection(db).findOneAndUpdate(
     { type: input.type, key: input.key },
-    {
-      $setOnInsert: {
-        jobId,
-        type: input.type,
-        key: input.key,
-        state: 'pending' as JobState,
-        payload: input.payload ?? {},
-        runAfter: input.runAfter ?? now,
-        attempts: 0,
-        maxAttempts: input.maxAttempts ?? 5,
-        leaseOwner: null,
-        leaseUntil: null,
-        createdAt: now,
-        updatedAt: now,
-        completedAt: null,
-        lastError: null,
-      },
-    },
-    { upsert: true, returnDocument: 'after' },
+    update,
+    { upsert: true, returnDocument: 'after', ...(session ? { session } : {}) },
   );
   return doc?.jobId ?? jobId;
 }
@@ -72,12 +81,24 @@ export async function enqueueJob(db: Db, input: EnqueueJobInput): Promise<string
  */
 export async function claimJobs(
   db: Db,
-  options: { owner: string; limit: number; leaseMs: number; type?: string; now?: Date },
+  options: {
+    owner: string;
+    limit: number;
+    leaseMs: number;
+    type?: string;
+    typePrefix?: string;
+    now?: Date;
+  },
 ): Promise<DurableJobDoc[]> {
   const now = options.now ?? new Date();
   const coll = collection(db);
   const filter: Record<string, unknown> = { state: 'pending', runAfter: { $lte: now } };
-  if (options.type) filter.type = options.type;
+  if (options.type) {
+    filter.type = options.type;
+  } else if (options.typePrefix) {
+    const escaped = options.typePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    filter.type = { $regex: `^${escaped}` };
+  }
 
   const claimed: DurableJobDoc[] = [];
   for (let i = 0; i < options.limit; i += 1) {

@@ -87,6 +87,18 @@ export const openApiDocument: OpenApiDocument = {
     '/api/auth/logout': {
       post: { summary: 'Sign out', responses: { '200': { description: 'Session revoked' }, '403': errorResponse } },
     },
+    '/api/auth/email/verify': {
+      post: {
+        summary: 'Verify email with a one-time token from the registration email',
+        responses: { '200': { description: 'Email verified' }, '422': errorResponse, '429': errorResponse },
+      },
+    },
+    '/api/auth/email/resend': {
+      post: {
+        summary: 'Resend the email verification message (authenticated)',
+        responses: { '200': { description: 'Verification email sent' }, '409': errorResponse, '403': errorResponse },
+      },
+    },
     '/api/auth/mfa/enroll': {
       post: { summary: 'Begin MFA enrollment', responses: { '200': { description: 'TOTP secret' }, '403': errorResponse, '409': errorResponse } },
     },

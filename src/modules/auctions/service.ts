@@ -6,6 +6,7 @@ import { enqueueEvent } from '../outbox/repository.ts';
 import { isStaff, type Role } from '../auth/roles.ts';
 import type { UserDoc } from '../auth/models.ts';
 import { insertSoldOrder } from '../orders/service.ts';
+import { enqueueLotEndingReminder, enqueueWinnerMailJobs } from '../mail/jobs.ts';
 
 export type AuctionStatus = 'draft' | 'scheduled' | 'live' | 'closed' | 'cancelled';
 
@@ -121,6 +122,7 @@ export function createAuctionService(deps: { db: Db; withTransaction: Tx }) {
       if (doc.incrementMinor < 1) throw new AppError('VALIDATION_ERROR', 'Increment must be at least 1 minor unit', { fieldErrors: { incrementMinor: 'invalid' } });
       void actor;
       await auctions().insertOne(doc);
+      await enqueueLotEndingReminder(deps.db, { lotReference: doc.lotReference, endsAt: doc.endsAt });
       return doc;
     },
 
@@ -148,6 +150,12 @@ export function createAuctionService(deps: { db: Db; withTransaction: Tx }) {
         eventId: `${lot}:started`,
         payload: { status: updated.status },
       });
+      await enqueueLotEndingReminder(
+        deps.db,
+        { lotReference: updated.lotReference, endsAt: updated.endsAt },
+        undefined,
+        { reschedule: true },
+      );
       return updated;
     },
 
@@ -307,12 +315,23 @@ export function createAuctionService(deps: { db: Db; withTransaction: Tx }) {
           throw conflict('Auction changed while closing');
         }
         if (sold && top) {
+          const orderReference = `ord_${auction.lotReference}`;
           await insertSoldOrder(deps.db, {
             lotReference: auction.lotReference,
             listingReference: auction.listingReference,
             winnerUserReference: top.userReference,
             winningPriceMinor: top.amountMinor,
           }, session);
+          await enqueueWinnerMailJobs(
+            deps.db,
+            {
+              lotReference: auction.lotReference,
+              userReference: top.userReference,
+              orderReference,
+              closedAt: now,
+            },
+            session,
+          );
         }
         await enqueueEvent(deps.db, {
           aggregateType: 'auction',

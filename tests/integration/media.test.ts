@@ -31,7 +31,7 @@ const ADMIN_PHONE = '55555000';
 const ADMIN_PW = 'media admin pw 1';
 const BOOTSTRAP_TOKEN = 'media-integration-token';
 const CUSTOMER_PHONE = '55555001';
-const CUSTOMER_PW = 'media customer pw 1';
+const CUSTOMER_PW = 'Qw9!xrTpm8k';
 
 before(async () => {
   replSet = await createReplSet();

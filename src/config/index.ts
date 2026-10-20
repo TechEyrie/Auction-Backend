@@ -50,6 +50,13 @@ export type AppConfig = {
   imagekitFolder: string;
   paymentProvider: string | null;
   paymentWebhookSecret: string | null;
+  smtpHost: string | null;
+  smtpPort: number;
+  smtpSecure: boolean;
+  smtpUser: string | null;
+  smtpPass: string | null;
+  quoteFromEmail: string | null;
+  quoteFromName: string | null;
 };
 
 export class ConfigurationError extends Error {
@@ -107,6 +114,14 @@ const schema = z.object({
   IMAGEKIT_PUBLIC_KEY: z.string().optional(),
   IMAGEKIT_PRIVATE_KEY: z.string().optional(),
   IMAGEKIT_FOLDER: z.string().optional(),
+
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_SECURE: z.enum(['true', 'false']).optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  QUOTE_FROM_EMAIL: z.string().optional(),
+  QUOTE_FROM_NAME: z.string().optional(),
 });
 
 function parseTrustProxy(raw: string): boolean | number {
@@ -254,5 +269,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     imagekitFolder: (data.IMAGEKIT_FOLDER ?? '').trim() || '/araq-kahraman/listings',
     paymentProvider: (data.PAYMENT_PROVIDER ?? '').trim() || null,
     paymentWebhookSecret: (data.PAYMENT_WEBHOOK_SECRET ?? '').trim() || null,
+    smtpHost: (data.SMTP_HOST ?? '').trim() || null,
+    smtpPort: data.SMTP_PORT,
+    smtpSecure: data.SMTP_SECURE === 'true',
+    smtpUser: (data.SMTP_USER ?? '').trim() || null,
+    smtpPass: (data.SMTP_PASS ?? '').trim() || null,
+    quoteFromEmail: (data.QUOTE_FROM_EMAIL ?? '').trim() || null,
+    quoteFromName: (data.QUOTE_FROM_NAME ?? '').trim() || null,
   };
 }

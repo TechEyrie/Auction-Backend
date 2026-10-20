@@ -396,10 +396,25 @@ async function main() {
     await customerClient.bootstrap();
     const registration = await customerClient.post(
       '/api/auth/register',
-      { fullName: 'Browser Customer', phone: CUSTOMER_PHONE, password: CUSTOMER_PW, termsAccepted: true },
+      {
+        fullName: 'Browser Customer',
+        phone: CUSTOMER_PHONE,
+        email: 'browser.customer@example.test',
+        password: CUSTOMER_PW,
+        termsAccepted: true,
+      },
       { origin: frontendOrigin },
     );
     if (registration.status !== 201) throw new Error(`customer fixture failed: ${JSON.stringify(registration.body)}`);
+    const verifyToken = registration.body?.devVerifyToken;
+    if (verifyToken) {
+      const verified = await customerClient.post(
+        '/api/auth/email/verify',
+        { token: verifyToken },
+        { origin: frontendOrigin },
+      );
+      if (verified.status !== 200) throw new Error(`email verify failed: ${JSON.stringify(verified.body)}`);
+    }
 
     await setValue('#ph', CUSTOMER_PHONE);
     await setValue('#pw', CUSTOMER_PW);

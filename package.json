@@ -15,6 +15,7 @@
     "test:integration": "node --test --env-file-if-exists=.env \"tests/integration/**/*.test.ts\"",
     "seed": "node --env-file-if-exists=.env scripts/seed.ts",
     "listings:backfill-audience": "node --env-file-if-exists=.env scripts/backfill-listing-audience.ts --target=development",
+    "email:backfill-verified": "node --env-file-if-exists=.env scripts/backfill-email-verified.ts --target=development",
     "indexes": "node --env-file-if-exists=.env scripts/ensure-indexes.ts",
     "admin:bootstrap": "node --env-file-if-exists=.env scripts/bootstrap-admin.ts",
     "browser:check": "node scripts/browser-check.mjs",
@@ -24,12 +25,14 @@
     "express": "^5.3.0",
     "imagekit": "^5.2.0",
     "mongodb": "^7.7.0",
+    "nodemailer": "^10.1.7",
     "socket.io": "^4.8.4",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^22.15.3",
+    "@types/nodemailer": "^8.0.2",
     "mongodb-memory-server": "^11.3.0",
     "socket.io-client": "^4.8.4",
     "typescript": "5.8.3"

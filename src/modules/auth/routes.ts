@@ -9,7 +9,7 @@ import { parseInput } from '../../shared/validate.ts';
 import { randomToken } from '../../shared/crypto.ts';
 import { safeInternalPath } from '../../shared/returnUrl.ts';
 import { clearSessionCookie, CSRF_COOKIE, readCookie, setCsrfCookie, setSessionCookie } from './cookies.ts';
-import { clientIp, requireActiveUser, requireAuth } from './middleware.ts';
+import { clientIp, requireActiveUser, requireAuth, requireEmailVerified } from './middleware.ts';
 import { createAuthService } from './service.ts';
 
 export type AuthRouterDeps = { db: Db; config: AppConfig; logger: Logger };
@@ -63,7 +63,7 @@ export function authRouter(deps: AuthRouterDeps): Router {
   const registerSchema = z.object({
     fullName: z.string().min(2).max(120),
     phone: z.string().min(4).optional().nullable(),
-    email: z.string().optional().nullable(),
+    email: z.string({ error: 'required' }).trim().min(1, 'required').email().max(120),
     password: z.string().min(1).max(200),
     preferredLocale: z.string().max(8).optional(),
     termsAccepted: z.boolean(),
@@ -77,7 +77,11 @@ export function authRouter(deps: AuthRouterDeps): Router {
       const result = await service.register(body, { ip: clientIp(req), userAgent: req.header('user-agent') ?? null });
       setSessionCookie(res, config, result.session.token, result.session.cookieMaxAgeMs);
       setCsrfCookie(res, config, result.session.csrfToken);
-      res.status(201).json({ user: result.user, returnTo: safeInternalPath(body.returnTo) });
+      res.status(201).json({
+        user: result.user,
+        returnTo: safeInternalPath(body.returnTo),
+        ...(result.verifyToken && !config.isProduction ? { devVerifyToken: result.verifyToken } : {}),
+      });
     } catch (err) {
       next(err);
     }
@@ -135,6 +139,30 @@ export function authRouter(deps: AuthRouterDeps): Router {
 
   const resetSchema = z.object({ token: z.string().min(10), password: z.string().min(1).max(200) });
 
+  const emailVerifySchema = z.object({ token: z.string().min(10) });
+
+  router.post('/email/verify', limit('reset'), async (req, res, next) => {
+    try {
+      const body = parseInput(emailVerifySchema, req.body);
+      await service.verifyEmail(body.token);
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/email/resend', requireAuth(), requireActiveUser(), limit('forgot'), async (req, res, next) => {
+    try {
+      const token = await service.resendEmailVerification(req.auth!.user, clientIp(req));
+      res.json({
+        ok: true,
+        ...(token && !config.isProduction ? { devVerifyToken: token } : {}),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.post('/password/reset', limit('reset'), async (req, res, next) => {
     try {
       const body = parseInput(resetSchema, req.body);
@@ -146,7 +174,7 @@ export function authRouter(deps: AuthRouterDeps): Router {
     }
   });
 
-  router.post('/mfa/enroll', requireAuth(), requireActiveUser(), async (req, res, next) => {
+  router.post('/mfa/enroll', requireAuth(), requireActiveUser(), requireEmailVerified(), async (req, res, next) => {
     try {
       const key = requireMfaKey();
       const body = parseInput(z.object({ code: z.string().min(4).optional() }), req.body);
@@ -157,7 +185,7 @@ export function authRouter(deps: AuthRouterDeps): Router {
     }
   });
 
-  router.post('/mfa/enroll/confirm', requireAuth(), requireActiveUser(), async (req, res, next) => {
+  router.post('/mfa/enroll/confirm', requireAuth(), requireActiveUser(), requireEmailVerified(), async (req, res, next) => {
     try {
       const key = requireMfaKey();
       const body = parseInput(z.object({ code: z.string().min(6).max(6) }), req.body);

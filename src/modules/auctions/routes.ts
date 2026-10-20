@@ -2,7 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod';
 import type { Db, ClientSession } from 'mongodb';
 import type { AppConfig } from '../../config/index.ts';
-import { requireActiveUser, requireAuth, requireCapability, requireMfa } from '../auth/middleware.ts';
+import { requireActiveUser, requireAuth, requireCapability, requireEmailVerified, requireMfa } from '../auth/middleware.ts';
 import { parseInput } from '../../shared/validate.ts';
 import { createAuctionService, adminStateOf, stateOf } from './service.ts';
 
@@ -59,7 +59,7 @@ export function auctionRouter(deps: {
     } catch (err) { next(err); }
   });
 
-  router.post('/:lot/bids', requireAuth(), requireActiveUser(), requireMfa(), async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/:lot/bids', requireAuth(), requireActiveUser(), requireEmailVerified(), requireMfa(), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const body = parseInput(bidSchema, req.body);
       const user = req.auth!.user;

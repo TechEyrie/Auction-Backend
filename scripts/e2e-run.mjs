@@ -102,6 +102,11 @@ async function registerCustomer(label) {
     termsAccepted: true,
   });
   if (reg.status !== 201) throw new Error(`register ${label} ${reg.status} ${JSON.stringify(reg.body)}`);
+  const verifyToken = reg.body?.devVerifyToken;
+  if (verifyToken) {
+    const verified = await c.post('/api/auth/email/verify', { token: verifyToken });
+    if (verified.status !== 200) throw new Error(`verify ${label} ${verified.status} ${JSON.stringify(verified.body)}`);
+  }
   await enrollCustomerMfa(c);
   return { client: c, email };
 }

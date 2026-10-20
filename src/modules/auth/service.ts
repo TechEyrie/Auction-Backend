@@ -1,4 +1,4 @@
-import type { Db } from 'mongodb';
+import type { Db, ObjectId } from 'mongodb';
 import type { AppConfig } from '../../config/index.ts';
 import { AppError, conflict } from '../../shared/errors.ts';
 import type { Logger } from '../../shared/logger.ts';
@@ -7,6 +7,7 @@ import { hashPassword, verifyPassword } from '../../shared/password.ts';
 import { evaluatePassword, passwordPolicyMessage } from '../../shared/passwordPolicy.ts';
 import { normalizeEmail, normalizePhoneE164 } from '../../shared/normalize.ts';
 import { generateTotpSecret, verifyTotp, TOTP_STEP_SECONDS } from '../../shared/totp.ts';
+import { sendTransactionalMail } from '../../shared/mail.ts';
 import { recordAudit } from '../audit/repository.ts';
 import { toUserDto, type UserDto } from './dto.ts';
 import { capabilitiesFor, isStaff } from './roles.ts';
@@ -16,6 +17,7 @@ import type { AuthContext, SessionDoc, UserDoc, UserWithId } from './models.ts';
 export type AuthDeps = { db: Db; config: AppConfig; logger: Logger };
 
 const CHALLENGE_TTL_MS = 30 * 60_000;
+const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60_000;
 const CHALLENGE_MAX_ATTEMPTS = 5;
 const RECOVERY_CODE_COUNT = 10;
 
@@ -85,7 +87,7 @@ async function issueSession(
 export type RegisterInput = {
   fullName: string;
   phone?: string | null;
-  email?: string | null;
+  email: string;
   password: string;
   preferredLocale?: string;
   termsAccepted: boolean;
@@ -95,10 +97,44 @@ export type RegisterInput = {
 export function createAuthService(deps: AuthDeps) {
   const { db, config } = deps;
 
+  async function issueEmailVerifyChallenge(
+    userId: ObjectId,
+    emailNormalized: string,
+    ip: string | null,
+  ): Promise<string> {
+    await repo.invalidateUserChallenges(db, userId, 'email_verify');
+    const token = randomToken(32);
+    await repo.insertChallenge(db, {
+      purpose: 'email_verify',
+      userId,
+      identifier: emailNormalized,
+      tokenHash: sha256Hex(token),
+      expiresAt: new Date(Date.now() + EMAIL_VERIFY_TTL_MS),
+      attempts: 0,
+      maxAttempts: CHALLENGE_MAX_ATTEMPTS,
+      consumedAt: null,
+      createdAt: new Date(),
+      requestIp: ip,
+    });
+    return token;
+  }
+
+  async function sendEmailVerifyMail(to: string, rawToken: string): Promise<void> {
+    const origin = config.corsOrigins[0] ?? 'http://localhost:3000';
+    const link = `${origin}/signin?verifyEmail=${encodeURIComponent(rawToken)}`;
+    const text = `Verify your email for Araq & Kahraman.\n\nOpen this link:\n${link}\n\nOr paste this verification code on the sign-in page:\n${rawToken}\n\nThis link expires in 24 hours.`;
+    await sendTransactionalMail({
+      config,
+      to,
+      subject: 'Verify your email',
+      text,
+    });
+  }
+
   async function register(input: RegisterInput, ctx: { ip: string | null; userAgent: string | null }) {
     const phoneE164 = input.phone?.trim() ? normalizePhoneE164(input.phone) : null;
     const emailNormalized = normalizeEmail(input.email ?? null);
-    if (!phoneE164 && !emailNormalized) {
+    if (!emailNormalized) {
       throw new AppError('VALIDATION_ERROR', 'Enter an email address', {
         fieldErrors: { email: 'required' },
       });
@@ -160,7 +196,16 @@ export function createAuthService(deps: AuthDeps) {
       changeSummary: { phoneE164, roles: doc.roles },
       reason: null,
     });
-    return { user: toUserDto(user), session };
+    const verifyToken = await issueEmailVerifyChallenge(insertedId, emailNormalized, ctx.ip);
+    try {
+      await sendEmailVerifyMail(emailNormalized, verifyToken);
+    } catch (err) {
+      deps.logger.error('email verify send failed after register', {
+        userId: insertedId.toHexString(),
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return { user: toUserDto(user), session, verifyToken };
   }
 
   async function login(
@@ -219,6 +264,58 @@ export function createAuthService(deps: AuthDeps) {
       requestIp: ip,
     });
     // Delivery adapter is not configured: the token is returned only outside production.
+    return config.isProduction ? null : token;
+  }
+
+  async function verifyEmail(token: string): Promise<void> {
+    const challenge = await repo.findChallengeByTokenHash(db, sha256Hex(String(token ?? '')));
+    if (!challenge || challenge.purpose !== 'email_verify') {
+      throw new AppError('VALIDATION_ERROR', 'This verification link is invalid or has already been used');
+    }
+    if (challenge.userId) {
+      const alreadyVerified = await repo.findUserById(db, challenge.userId);
+      if (alreadyVerified?.emailVerifiedAt) {
+        return;
+      }
+    }
+    if (challenge.consumedAt) {
+      throw new AppError('VALIDATION_ERROR', 'This verification link is invalid or has already been used');
+    }
+    if (challenge.expiresAt.getTime() < Date.now()) {
+      throw new AppError('VALIDATION_ERROR', 'This verification link has expired');
+    }
+    if (challenge.attempts >= challenge.maxAttempts) {
+      throw new AppError('RATE_LIMITED', 'Too many attempts on this verification link');
+    }
+    if (!challenge.userId) throw new AppError('VALIDATION_ERROR', 'This verification link is invalid');
+    const user = await repo.findUserById(db, challenge.userId);
+    if (!user || user.emailVerifiedAt) {
+      throw new AppError('VALIDATION_ERROR', 'This verification link is invalid or has already been used');
+    }
+    await repo.incrementChallengeAttempts(db, challenge._id);
+    const consumed = await repo.consumeChallenge(db, challenge._id);
+    if (!consumed) throw new AppError('VALIDATION_ERROR', 'This verification link has already been used');
+    await repo.updateUserEmailVerified(db, challenge.userId, new Date());
+  }
+
+  async function resendEmailVerification(user: UserWithId, ip: string | null): Promise<string | null> {
+    if (user.emailVerifiedAt) {
+      throw new AppError('CONFLICT', 'Email is already verified');
+    }
+    const emailNormalized = user.emailNormalized;
+    if (!emailNormalized) {
+      throw new AppError('VALIDATION_ERROR', 'This account has no email address');
+    }
+    const token = await issueEmailVerifyChallenge(user._id, emailNormalized, ip);
+    try {
+      await sendEmailVerifyMail(emailNormalized, token);
+    } catch (err) {
+      deps.logger.error('email verify resend failed', {
+        userId: user._id.toHexString(),
+        err: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
     return config.isProduction ? null : token;
   }
 
@@ -367,6 +464,8 @@ export function createAuthService(deps: AuthDeps) {
     register,
     login,
     logout,
+    verifyEmail,
+    resendEmailVerification,
     forgotPassword,
     resetPassword,
     startMfaEnrollment,

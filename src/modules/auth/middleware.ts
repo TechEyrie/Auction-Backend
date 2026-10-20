@@ -6,7 +6,7 @@ import { safeEqualHex, sha256Hex } from '../../shared/crypto.ts';
 import { CSRF_COOKIE, SESSION_COOKIE, readCookie } from './cookies.ts';
 import * as repo from './repository.ts';
 import type { AuthContext } from './models.ts';
-import { capabilitiesFor, type Capability } from './roles.ts';
+import { capabilitiesFor, isStaff, type Capability } from './roles.ts';
 import { requiresMfa } from './service.ts';
 
 declare global {
@@ -107,6 +107,22 @@ export function requireActiveUser(): RequestHandler {
     if (!req.auth) return next(new AppError('UNAUTHORIZED', 'Authentication required'));
     if (req.auth.user.status !== 'active') {
       return next(new AppError('FORBIDDEN', 'This account is not active'));
+    }
+    next();
+  };
+}
+
+/** Customers must verify email before bidding, buying, paying, or enrolling MFA. */
+export function requireEmailVerified(): RequestHandler {
+  return (req, _res, next) => {
+    if (!req.auth) return next(new AppError('UNAUTHORIZED', 'Authentication required'));
+    if (isStaff(req.auth.user.roles)) return next();
+    if (!req.auth.user.emailVerifiedAt) {
+      return next(
+        new AppError('FORBIDDEN', 'Verify your email before continuing', {
+          details: { reason: 'EMAIL_NOT_VERIFIED' },
+        }),
+      );
     }
     next();
   };

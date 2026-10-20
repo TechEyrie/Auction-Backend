@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { parseInput } from '../../shared/validate.ts';
-import { requireActiveUser, requireAuth, requireCapability, requireMfa } from '../auth/middleware.ts';
+import { requireActiveUser, requireAuth, requireCapability, requireEmailVerified, requireMfa } from '../auth/middleware.ts';
 import { parseFulfillmentBody } from '../orders/service.ts';
 import { toAdminListingDto, toCustomerListingDto, toPublicListingDto } from './dto.ts';
 import { AUDIENCES, CONDITIONS, LANGUAGE_MODES, LISTING_METHODS, type ListingMethod } from './models.ts';
@@ -151,7 +151,7 @@ export function publicListingRouter(deps: ListingRouterDeps): Router {
     }
   });
 
-  router.post('/:ref/buy', requireAuth(), requireActiveUser(), requireMfa(), async (req, res, next) => {
+  router.post('/:ref/buy', requireAuth(), requireActiveUser(), requireEmailVerified(), requireMfa(), async (req, res, next) => {
     try {
       const ref = parseInput(listingReferenceSchema, String(req.params.ref), 'Invalid listing reference');
       const body = parseInput(buySchema, req.body ?? {});

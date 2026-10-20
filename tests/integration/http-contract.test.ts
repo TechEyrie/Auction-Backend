@@ -128,7 +128,8 @@ test('registration is customer-only and returns the session cookie header contra
     {
       fullName: 'Http Contract',
       phone: '55558888',
-      password: 'contract password 1',
+      email: 'http.contract@example.test',
+      password: 'Qw9!xrTpm9k',
       termsAccepted: true,
       // Attempted privilege escalation / verification forgery must be discarded.
       roles: ['super_admin'],
@@ -162,7 +163,7 @@ test('keep-me-signed-in is what adds a persistent cookie lifetime', async () => 
   await client.bootstrap();
   const res = await client.post('/api/auth/login', {
     identifier: '55558888',
-    password: 'contract password 1',
+    password: 'Qw9!xrTpm9k',
     keepSignedIn: true,
   });
   assert.equal(res.status, 200);
@@ -180,7 +181,7 @@ test('mutation safety: origin, CSRF token and session binding are enforced over 
 
   const client = new TestClient(baseUrl);
   await client.bootstrap();
-  await client.post('/api/auth/login', { identifier: '55558888', password: 'contract password 1' });
+  await client.post('/api/auth/login', { identifier: '55558888', password: 'Qw9!xrTpm9k' });
   const token = client.csrfToken();
 
   const badOrigin = await fetch(`${baseUrl}/api/auth/logout`, {
@@ -197,7 +198,7 @@ test('mutation safety: origin, CSRF token and session binding are enforced over 
 
   const unbound = new TestClient(baseUrl);
   await unbound.bootstrap();
-  await unbound.post('/api/auth/login', { identifier: '55558888', password: 'contract password 1' });
+  await unbound.post('/api/auth/login', { identifier: '55558888', password: 'Qw9!xrTpm9k' });
   unbound.setCsrfToken('not-the-bound-token');
   assert.equal((await unbound.post('/api/auth/logout', {})).status, 403);
 
@@ -212,7 +213,7 @@ test('anonymous and under-privileged calls get 401 and 403, not data', async () 
 
   const customer = new TestClient(baseUrl);
   await customer.bootstrap();
-  await customer.post('/api/auth/login', { identifier: '55558888', password: 'contract password 1' });
+  await customer.post('/api/auth/login', { identifier: '55558888', password: 'Qw9!xrTpm9k' });
   assert.equal((await customer.get('/api/admin/users')).status, 403);
   assert.equal((await customer.get('/api/admin/me')).status, 403);
 });
