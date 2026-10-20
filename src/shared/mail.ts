@@ -30,10 +30,18 @@ export async function sendTransactionalMail(input: {
     socketTimeout: 15_000,
     greetingTimeout: 10_000,
   });
-  await transport.sendMail({
-    from: `${fromName} <${fromEmail}>`,
-    to,
-    subject,
-    text,
-  });
+  try {
+    await transport.sendMail({
+      from: `${fromName} <${fromEmail}>`,
+      to,
+      subject,
+      text,
+    });
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    throw new AppError('SERVICE_UNAVAILABLE', 'We could not send email right now. Try again in a few minutes.', {
+      expose: true,
+      cause: err,
+    });
+  }
 }

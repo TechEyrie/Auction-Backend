@@ -27,7 +27,7 @@ export type AppErrorOptions = {
   fieldErrors?: Record<string, string>;
   details?: Record<string, unknown>;
   cause?: unknown;
-  /** Force a message to be returned to the client (default: only for < 500). */
+  /** Force a message to be returned to the client (default: < 500 or SERVICE_UNAVAILABLE). */
   expose?: boolean;
 };
 
@@ -45,7 +45,7 @@ export class AppError extends Error {
     this.status = STATUS_BY_CODE[code];
     this.fieldErrors = options.fieldErrors ?? {};
     this.details = options.details ?? {};
-    this.expose = options.expose ?? this.status < 500;
+    this.expose = options.expose ?? (this.status < 500 || this.code === 'SERVICE_UNAVAILABLE');
     if (options.cause !== undefined) this.cause = options.cause;
   }
 }

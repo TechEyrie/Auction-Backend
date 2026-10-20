@@ -16,6 +16,9 @@ function buildApp() {
   app.get('/bad', () => {
     throw validationError({ email: 'required' });
   });
+  app.get('/unavailable', () => {
+    throw new AppError('SERVICE_UNAVAILABLE', 'We could not send email right now. Try again in a few minutes.');
+  });
   app.get('/raw', () => {
     throw new Error('raw failure with internals');
   });
@@ -49,6 +52,20 @@ test('validation errors return per-field errors with 422', async () => {
     const body = (await res.json()) as { error: { code: string; fieldErrors: Record<string, string> } };
     assert.equal(body.error.code, 'VALIDATION_ERROR');
     assert.equal(body.error.fieldErrors.email, 'required');
+  } finally {
+    await server.close();
+  }
+});
+
+test('service unavailable errors expose a safe client message with 503', async () => {
+  const server = await listen(buildApp());
+  try {
+    const res = await fetch(`${server.url}/unavailable`);
+    assert.equal(res.status, 503);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    assert.equal(body.error.code, 'SERVICE_UNAVAILABLE');
+    assert.equal(body.error.message, 'We could not send email right now. Try again in a few minutes.');
+    assert.notEqual(body.error.message, 'Internal server error');
   } finally {
     await server.close();
   }
