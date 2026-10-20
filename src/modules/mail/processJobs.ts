@@ -1,10 +1,12 @@
 import type { Db } from 'mongodb';
 import type { AppConfig } from '../../config/index.ts';
+import type { Logger } from '../../shared/logger.ts';
 import { COLLECTIONS } from '../../db/indexes.ts';
 import { sendTransactionalMail } from '../../shared/mail.ts';
 import type { UserDoc } from '../auth/models.ts';
 import type { AuctionDoc } from '../auctions/service.ts';
 import type { OrderDoc } from '../orders/service.ts';
+import type { ListingDoc, LocalizedText } from '../listings/models.ts';
 import {
   claimJobs,
   completeJob,
@@ -15,26 +17,65 @@ import {
 import { MAIL_JOB_TYPES, type WinnerMailPayload } from './jobs.ts';
 
 const MAIL_BACKOFF_MS = 30_000;
+const MAIL_RETRY_BACKOFF_MS = 10_000;
 const MAIL_LEASE_MS = 60_000;
+
+export type MailJobOutcome = 'sent' | 'skip' | 'retry';
+
+type ListingMailProjection = Pick<ListingDoc, 'listingReference' | 'title'>;
 
 function siteOrigin(config: AppConfig): string {
   return config.corsOrigins[0] ?? 'http://localhost:3000';
 }
 
-function asWinnerPayload(job: DurableJobDoc): WinnerMailPayload | null {
-  const p = job.payload;
-  if (
-    typeof p.lotReference !== 'string' ||
-    typeof p.userReference !== 'string' ||
-    typeof p.orderReference !== 'string'
-  ) {
-    return null;
+function listingDisplayTitle(title: LocalizedText | null | undefined): string {
+  const en = title?.en?.trim() ?? '';
+  const ar = title?.ar?.trim() ?? '';
+  return en || ar || 'this item';
+}
+
+function productUrl(origin: string, listingReference: string): string {
+  const ref = listingReference.trim();
+  return `${origin}/product/${encodeURIComponent(ref)}`;
+}
+
+async function loadListingForMail(db: Db, listingReference: string): Promise<ListingMailProjection | null> {
+  return db.collection<ListingMailProjection>(COLLECTIONS.listings).findOne(
+    { listingReference },
+    { projection: { listingReference: 1, title: 1 } },
+  );
+}
+
+async function resolveWinnerListingReference(
+  db: Db,
+  payload: { lotReference: string; listingReference?: string },
+): Promise<string | null> {
+  if (payload.listingReference) return payload.listingReference;
+  const auction = await db.collection<Pick<AuctionDoc, 'listingReference'>>(COLLECTIONS.auctions).findOne(
+    { lotReference: payload.lotReference },
+    { projection: { listingReference: 1 } },
+  );
+  return auction?.listingReference ?? null;
+}
+
+async function sendMailWithLogging(
+  logger: Logger | undefined,
+  jobType: string,
+  input: { config: AppConfig; to: string; subject: string; text: string },
+): Promise<void> {
+  const { to, subject } = input;
+  try {
+    await sendTransactionalMail(input);
+    logger?.info('transactional mail sent', { type: jobType, to, subject });
+  } catch (err) {
+    logger?.error('transactional mail failed', {
+      type: jobType,
+      to,
+      subject,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   }
-  return {
-    lotReference: p.lotReference,
-    userReference: p.userReference,
-    orderReference: p.orderReference,
-  };
 }
 
 async function resolveUserEmail(db: Db, userReference: string): Promise<string | null> {
@@ -46,53 +87,123 @@ async function resolveUserEmail(db: Db, userReference: string): Promise<string |
   return email || null;
 }
 
-async function processOneMailJob(db: Db, config: AppConfig, job: DurableJobDoc): Promise<void> {
+async function processOneMailJob(
+  db: Db,
+  config: AppConfig,
+  job: DurableJobDoc,
+  logger?: Logger,
+): Promise<MailJobOutcome> {
+  const origin = siteOrigin(config);
+
   if (job.type === MAIL_JOB_TYPES.winnerWon || job.type === MAIL_JOB_TYPES.winnerAction) {
-    const payload = asWinnerPayload(job);
-    if (!payload) return;
+    const raw = job.payload;
+    if (
+      typeof raw.lotReference !== 'string' ||
+      typeof raw.userReference !== 'string' ||
+      typeof raw.orderReference !== 'string'
+    ) {
+      logger?.warn('transactional mail skipped', { type: job.type, reason: 'invalid payload' });
+      return 'skip';
+    }
+    const listingReference = await resolveWinnerListingReference(db, {
+      lotReference: raw.lotReference,
+      listingReference: typeof raw.listingReference === 'string' ? raw.listingReference : undefined,
+    });
+    if (!listingReference) {
+      logger?.warn('transactional mail skipped', { type: job.type, reason: 'listing not found' });
+      return 'skip';
+    }
+    const payload: WinnerMailPayload = {
+      lotReference: raw.lotReference,
+      listingReference,
+      userReference: raw.userReference,
+      orderReference: raw.orderReference,
+    };
     if (job.type === MAIL_JOB_TYPES.winnerAction) {
       const order = await db.collection<Pick<OrderDoc, 'paymentState'>>(COLLECTIONS.orders).findOne(
         { orderReference: payload.orderReference },
         { projection: { paymentState: 1 } },
       );
-      if (order?.paymentState === 'paid') return;
+      if (order?.paymentState === 'paid') {
+        logger?.warn('transactional mail skipped', { type: job.type, reason: 'order already paid' });
+        return 'skip';
+      }
     }
     const to = await resolveUserEmail(db, payload.userReference);
-    if (!to) return;
-    const origin = siteOrigin(config);
+    if (!to) {
+      logger?.warn('transactional mail deferred', { type: job.type, reason: 'recipient email missing' });
+      return 'retry';
+    }
+    const listing = await loadListingForMail(db, listingReference);
+    const title = listingDisplayTitle(listing?.title);
+    const product = productUrl(origin, listingReference);
     if (job.type === MAIL_JOB_TYPES.winnerWon) {
-      await sendTransactionalMail({
+      const subject = `You won the auction for ${title}`;
+      await sendMailWithLogging(logger, job.type, {
         config,
         to,
-        subject: `You won lot ${payload.lotReference}`,
-        text: `You won lot ${payload.lotReference}.\n\nOpen ${origin}/account or ${origin}/product to pay.`,
+        subject,
+        text: `You won the auction for ${title}. ${product}`,
       });
-      return;
+      return 'sent';
     }
-    await sendTransactionalMail({
+    const subject = `Reminder: complete payment for ${title}`;
+    await sendMailWithLogging(logger, job.type, {
       config,
       to,
-      subject: `Reminder: complete payment for lot ${payload.lotReference}`,
-      text: `Reminder: you won lot ${payload.lotReference}. Please complete payment.\n\n${origin}/account`,
+      subject,
+      text: `Reminder: you won the auction for ${title}. Please complete payment. ${product}`,
     });
-    return;
+    return 'sent';
   }
 
   if (job.type === MAIL_JOB_TYPES.lotEnding) {
     const lotReference =
       typeof job.payload.lotReference === 'string' ? job.payload.lotReference : job.key;
     const auction = await db.collection<AuctionDoc>(COLLECTIONS.auctions).findOne({ lotReference });
-    if (!auction || auction.status !== 'live') return;
-    if (!auction.highestUserReference || auction.bidCount < 1) return;
+    if (!auction) {
+      logger?.warn('transactional mail skipped', { type: job.type, reason: 'auction not found' });
+      return 'skip';
+    }
+    if (auction.status === 'cancelled' || auction.status === 'closed') {
+      logger?.warn('transactional mail skipped', {
+        type: job.type,
+        reason: `auction ${auction.status}`,
+      });
+      return 'skip';
+    }
+    if (auction.status === 'draft') {
+      logger?.warn('transactional mail deferred', { type: job.type, reason: 'auction draft' });
+      return 'retry';
+    }
+    if (auction.status !== 'live' && auction.status !== 'scheduled') {
+      logger?.warn('transactional mail skipped', { type: job.type, reason: `auction ${auction.status}` });
+      return 'skip';
+    }
+    if (!auction.highestUserReference || auction.bidCount < 1) {
+      logger?.warn('transactional mail deferred', { type: job.type, reason: 'no high bidder yet' });
+      return 'retry';
+    }
     const to = await resolveUserEmail(db, auction.highestUserReference);
-    if (!to) return;
-    await sendTransactionalMail({
+    if (!to) {
+      logger?.warn('transactional mail deferred', { type: job.type, reason: 'recipient email missing' });
+      return 'retry';
+    }
+    const listing = await loadListingForMail(db, auction.listingReference);
+    const title = listingDisplayTitle(listing?.title);
+    const product = productUrl(origin, auction.listingReference);
+    const subject = `The auction for ${title} is ending soon`;
+    await sendMailWithLogging(logger, job.type, {
       config,
       to,
-      subject: `Lot ${lotReference} ends in about 30 minutes`,
-      text: `Lot ${lotReference} ends in about 30 minutes. You are the current high bidder.\n\n${siteOrigin(config)}/lot/${lotReference}`,
+      subject,
+      text: `The auction for ${title} is ending soon. You are the current high bidder. ${product}`,
     });
+    return 'sent';
   }
+
+  logger?.warn('transactional mail skipped', { type: job.type, reason: 'unknown mail job type' });
+  return 'skip';
 }
 
 /**
@@ -101,6 +212,7 @@ async function processOneMailJob(db: Db, config: AppConfig, job: DurableJobDoc):
 export async function processMailJobs(deps: {
   db: Db;
   config: AppConfig;
+  logger?: Logger;
   owner: string;
   limit?: number;
   now?: Date;
@@ -115,8 +227,19 @@ export async function processMailJobs(deps: {
     now,
   });
   for (const job of jobs) {
+    deps.logger?.info('mail job claimed', { type: job.type, jobId: job.jobId, key: job.key });
     try {
-      await processOneMailJob(deps.db, deps.config, job);
+      const outcome = await processOneMailJob(deps.db, deps.config, job, deps.logger);
+      if (outcome === 'retry') {
+        await failJob(deps.db, {
+          jobId: job.jobId,
+          owner: deps.owner,
+          error: 'mail deferred for retry',
+          backoffMs: MAIL_RETRY_BACKOFF_MS,
+          now,
+        });
+        continue;
+      }
       const done = await completeJob(deps.db, { jobId: job.jobId, owner: deps.owner });
       if (!done) {
         await failJob(deps.db, {

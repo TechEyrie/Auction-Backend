@@ -486,7 +486,7 @@ test('I01-I12 finance summary is platform revenue; seller settlements disabled',
   assert.equal(after.body.unsettledPayableMinor, 0);
 });
 
-test('auction create enqueues lot-ending mail job at endsAt minus 30 minutes', async () => {
+test('auction create enqueues lot-ending mail job at endsAt minus lead time', async () => {
   const endsInMs = 40 * 60 * 1000;
   const createdAt = Date.now();
   const created = await admin.post<{ auction: { lotReference: string } }>('/api/admin/auctions', {

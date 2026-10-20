@@ -7,6 +7,7 @@ import { createLogger, type Logger } from './shared/logger.ts';
 import { createMediaStorage, type MediaStorage } from './modules/media/storage.ts';
 import { createAuctionService } from './modules/auctions/service.ts';
 import { attachRealtime } from './realtime.ts';
+import { MAIL_SCHEDULE_MS } from './modules/mail/jobs.ts';
 import { processMailJobs } from './modules/mail/processJobs.ts';
 
 export type RunningServer = {
@@ -44,12 +45,17 @@ export async function startServer(deps: {
   const closer = createAuctionService({ db: deps.db.db, withTransaction: deps.db.withTransaction });
   const workerTick = () => {
     void closer.closeDue('system').catch((err: unknown) => deps.logger.error('auction close failed', { err: String(err) }));
-    void processMailJobs({ db: deps.db.db, config: deps.config, owner: 'mail-worker' }).catch((err: unknown) =>
+    void processMailJobs({ db: deps.db.db, config: deps.config, logger: deps.logger, owner: 'mail-worker' }).catch((err: unknown) =>
       deps.logger.error('mail jobs failed', { err: String(err) }),
     );
   };
-  const closeTimer = deps.config.isTest ? null : setInterval(workerTick, 5000);
-  closeTimer?.unref?.();
+  const closeTimer = deps.config.isTest
+    ? null
+    : (() => {
+        workerTick();
+        return setInterval(workerTick, 5000);
+      })();
+  deps.logger.info('mail worker schedule', { ...MAIL_SCHEDULE_MS });
 
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : deps.config.port;

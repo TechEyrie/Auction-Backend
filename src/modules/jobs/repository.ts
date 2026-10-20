@@ -42,33 +42,45 @@ function collection(db: Db): Collection<DurableJobDoc> {
 export async function enqueueJob(db: Db, input: EnqueueJobInput, session?: ClientSession): Promise<string> {
   const now = new Date();
   const jobId = randomUUID();
-  const update: Record<string, unknown> = {
-    $setOnInsert: {
-      jobId,
-      type: input.type,
-      key: input.key,
-      state: 'pending' as JobState,
-      payload: input.payload ?? {},
-      runAfter: input.runAfter ?? now,
-      attempts: 0,
-      maxAttempts: input.maxAttempts ?? 5,
-      leaseOwner: null,
-      leaseUntil: null,
-      createdAt: now,
+  const filter = { type: input.type, key: input.key };
+  if (input.reschedule) {
+    const set: Record<string, unknown> = {
       updatedAt: now,
+      state: 'pending' as JobState,
       completedAt: null,
       lastError: null,
-    },
-  };
-  if (input.reschedule) {
-    const set: Record<string, unknown> = { updatedAt: now };
+      leaseOwner: null,
+      leaseUntil: null,
+    };
     if (input.runAfter) set.runAfter = input.runAfter;
     if (input.payload) set.payload = input.payload;
-    if (Object.keys(set).length > 1) update.$set = set;
+    const rescheduled = await collection(db).findOneAndUpdate(
+      filter,
+      { $set: set },
+      { returnDocument: 'after', ...(session ? { session } : {}) },
+    );
+    if (rescheduled) return rescheduled.jobId;
   }
   const doc = await collection(db).findOneAndUpdate(
-    { type: input.type, key: input.key },
-    update,
+    filter,
+    {
+      $setOnInsert: {
+        jobId,
+        type: input.type,
+        key: input.key,
+        state: 'pending' as JobState,
+        payload: input.payload ?? {},
+        runAfter: input.runAfter ?? now,
+        attempts: 0,
+        maxAttempts: input.maxAttempts ?? 5,
+        leaseOwner: null,
+        leaseUntil: null,
+        createdAt: now,
+        updatedAt: now,
+        completedAt: null,
+        lastError: null,
+      },
+    },
     { upsert: true, returnDocument: 'after', ...(session ? { session } : {}) },
   );
   return doc?.jobId ?? jobId;

@@ -11,6 +11,7 @@ import { sha256Hex } from '../../src/shared/crypto.ts';
 import { generateTotp } from '../../src/shared/totp.ts';
 import { bootstrapSuperAdmin } from '../../src/modules/admin/bootstrap.ts';
 import { satisfyCustomerMfa } from '../helpers/authFixture.ts';
+import { mailCaptures } from '../../src/shared/mail.ts';
 
 let replSet: MongoMemoryReplSet;
 let handle: DbHandle;
@@ -260,6 +261,7 @@ test('C07 CSRF: mutations require a valid token and an allowed origin', async ()
 });
 
 test('C08 password reset is generic, single-use, expiring, and revokes sessions', async () => {
+  mailCaptures.length = 0;
   const client = new TestClient(baseUrl);
   await client.bootstrap();
   await client.post('/api/auth/register', {
@@ -270,15 +272,30 @@ test('C08 password reset is generic, single-use, expiring, and revokes sessions'
     termsAccepted: true,
   });
 
+  const resetMails = () =>
+    mailCaptures.filter(
+      (m) => m.subject === 'Reset your password' && m.to === 'reset.fixture@example.test',
+    );
+
   const unknown = new TestClient(baseUrl);
   await unknown.bootstrap();
   const unknownRes = await unknown.post('/api/auth/password/forgot', { identifier: '55559999' });
   assert.equal(unknownRes.status, 200);
   assert.ok(!('devResetToken' in (unknownRes.body as object)));
+  assert.equal(resetMails().length, 0);
 
   const forgot = await client.post('/api/auth/password/forgot', { identifier: '55550013' });
   const token = (forgot.body as { devResetToken?: string }).devResetToken;
   assert.ok(token);
+  assert.equal(resetMails().length, 1);
+  assert.match(resetMails()[0]!.text, /\/reset-password\?token=/);
+
+  const forgotEmail = await client.post('/api/auth/password/forgot', {
+    identifier: 'reset.fixture@example.test',
+  });
+  assert.ok((forgotEmail.body as { devResetToken?: string }).devResetToken);
+  assert.equal(resetMails().length, 2);
+  assert.match(resetMails()[1]!.text, /\/reset-password\?token=/);
 
   assert.equal(
     (await client.post('/api/auth/password/reset', { token: 'aaaaaaaaaaaaaaaaaaaa', password: 'new pass 12345' })).status,
@@ -294,6 +311,17 @@ test('C08 password reset is generic, single-use, expiring, and revokes sessions'
   assert.equal(
     (await client.post('/api/auth/password/reset', { token: expiredToken, password: 'new pass 12345' })).status,
     422,
+  );
+
+  const policyForgot = await client.post('/api/auth/password/forgot', { identifier: '55550013' });
+  const policyToken = (policyForgot.body as { devResetToken?: string }).devResetToken as string;
+  assert.equal(
+    (await client.post('/api/auth/password/reset', { token: policyToken, password: 'password123' })).status,
+    422,
+  );
+  assert.equal(
+    (await client.post('/api/auth/password/reset', { token: policyToken, password: 'new pass 12345' })).status,
+    200,
   );
 
   // Fresh token works once, then is rejected on reuse.

@@ -263,7 +263,24 @@ export function createAuthService(deps: AuthDeps) {
       createdAt: new Date(),
       requestIp: ip,
     });
-    // Delivery adapter is not configured: the token is returned only outside production.
+    if (user.emailNormalized) {
+      const origin = config.corsOrigins[0] ?? 'http://localhost:3000';
+      const link = `${origin}/reset-password?token=${encodeURIComponent(token)}`;
+      const text = `Reset your password for Araq & Kahraman.\n\n${link}\n\nThis link expires in 30 minutes.`;
+      try {
+        await sendTransactionalMail({
+          config,
+          to: user.emailNormalized,
+          subject: 'Reset your password',
+          text,
+        });
+      } catch (err) {
+        deps.logger.error('password reset email send failed', {
+          userId: user._id.toHexString(),
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     return config.isProduction ? null : token;
   }
 

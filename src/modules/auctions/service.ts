@@ -326,6 +326,7 @@ export function createAuctionService(deps: { db: Db; withTransaction: Tx }) {
             deps.db,
             {
               lotReference: auction.lotReference,
+              listingReference: auction.listingReference,
               userReference: top.userReference,
               orderReference,
               closedAt: now,

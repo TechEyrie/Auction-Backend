@@ -7,11 +7,18 @@ export const MAIL_JOB_TYPES = {
   lotEnding: 'mail.lot_ending',
 } as const;
 
+// Production lead 30min before endsAt; payment reminder 1h after close if unpaid.
 const LOT_ENDING_LEAD_MS = 30 * 60 * 1000;
 const WINNER_ACTION_DELAY_MS = 60 * 60 * 1000;
 
+export const MAIL_SCHEDULE_MS = {
+  lotEndingLeadMs: LOT_ENDING_LEAD_MS,
+  winnerActionDelayMs: WINNER_ACTION_DELAY_MS,
+} as const;
+
 export type WinnerMailPayload = {
   lotReference: string;
+  listingReference: string;
   userReference: string;
   orderReference: string;
 };
@@ -45,11 +52,18 @@ export async function enqueueLotEndingReminder(
 
 export async function enqueueWinnerMailJobs(
   db: Db,
-  input: { lotReference: string; userReference: string; orderReference: string; closedAt: Date },
+  input: {
+    lotReference: string;
+    listingReference: string;
+    userReference: string;
+    orderReference: string;
+    closedAt: Date;
+  },
   session?: ClientSession,
 ): Promise<void> {
   const payload: WinnerMailPayload = {
     lotReference: input.lotReference,
+    listingReference: input.listingReference,
     userReference: input.userReference,
     orderReference: input.orderReference,
   };
@@ -60,6 +74,7 @@ export async function enqueueWinnerMailJobs(
       key: input.lotReference,
       payload,
       runAfter: input.closedAt,
+      reschedule: true,
     },
     session,
   );
@@ -70,6 +85,7 @@ export async function enqueueWinnerMailJobs(
       key: input.lotReference,
       payload,
       runAfter: new Date(input.closedAt.getTime() + WINNER_ACTION_DELAY_MS),
+      reschedule: true,
     },
     session,
   );
