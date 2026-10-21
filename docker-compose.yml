@@ -1,0 +1,66 @@
+# Local API + MongoDB rs0; optional restore: docker compose --profile restore run --rm restore
+
+services:
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "--quiet",
+          "--eval",
+          "try { var s = rs.status(); if (s.ok === 1 && s.members.some(function (m) { return m.stateStr === 'PRIMARY'; })) quit(0); quit(1); } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }); quit(1); }",
+        ]
+      interval: 5s
+      timeout: 15s
+      retries: 30
+      start_period: 15s
+
+  api:
+    build: .
+    ports:
+      - "4000:4000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      MONGODB_URI: mongodb://mongo:27017/araq_kahraman?replicaSet=rs0
+      MONGODB_DB: araq_kahraman
+      MEDIA_DRIVER: local
+      MEDIA_STORAGE_ROOT: /data/media
+      CORS_ORIGINS: http://localhost:3000
+      COOKIE_SECURE: "false"
+      TRUST_PROXY: "false"
+    volumes:
+      - media-data:/data/media
+    command: ["sh", "-c", "node scripts/ensure-indexes.ts && node src/server.ts"]
+
+  restore:
+    image: mongo:7
+    profiles:
+      - restore
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./backup:/backup:ro
+    command:
+      [
+        "mongorestore",
+        "--uri=mongodb://mongo:27017/araq_kahraman?replicaSet=rs0",
+        "--dir=/backup/araq_kahraman",
+      ]
+
+volumes:
+  mongo-data:
+  media-data:

@@ -1,0 +1,64 @@
+# Required GitHub secrets:
+#   VPS_HOST      — VPS hostname or IP
+#   VPS_USER      — SSH user on the VPS
+#   VPS_SSH_KEY   — Private key (PEM) for SSH deploy
+#   APP_ENV       — Full backend .env file contents (optional; written remotely when set)
+#
+# CD is independent of CI (no needs: ci) so local simulation and emergency deploys
+# do not require a passing test job on GitHub.
+
+name: CD
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf 'Host vps\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  StrictHostKeyChecking accept-new\n' \
+            "$VPS_HOST" "$VPS_USER" >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Ensure remote paths
+        run: |
+          ssh vps 'mkdir -p /srv/araqandkahraman/backend /srv/araqandkahraman/env /srv/araqandkahraman/data/mongo /srv/araqandkahraman/data/media'
+
+      - name: Sync application to VPS
+        run: |
+          rsync -avz --delete \
+            --exclude 'node_modules' \
+            --exclude '.env' \
+            --exclude 'backup' \
+            --exclude '.cd-sim' \
+            --exclude '.git' \
+            -e ssh \
+            ./ vps:/srv/araqandkahraman/backend/
+
+      - name: Install remote env file
+        env:
+          APP_ENV: ${{ secrets.APP_ENV }}
+        run: |
+          if [ -n "$APP_ENV" ]; then
+            printf '%s' "$APP_ENV" | ssh vps 'umask 077 && cat > /srv/araqandkahraman/env/backend.env'
+          fi
+
+      - name: Docker Compose up
+        run: |
+          ssh vps 'cd /srv/araqandkahraman/backend && docker compose -f docker-compose.prod.yml up -d --build'

@@ -1,0 +1,48 @@
+# Production API + MongoDB rs0. No restore profile — never mongorestore from compose here.
+
+services:
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - "${MONGO_DATA:-/srv/araqandkahraman/data/mongo}:/data/db"
+    ports:
+      - ${MONGO_BIND:-127.0.0.1:27017}:27017
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "--quiet",
+          "--eval",
+          "try { var s = rs.status(); if (s.ok === 1 && s.members.some(function (m) { return m.stateStr === 'PRIMARY'; })) quit(0); quit(1); } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }); quit(1); }",
+        ]
+      interval: 5s
+      timeout: 15s
+      retries: 30
+      start_period: 15s
+    restart: unless-stopped
+
+  api:
+    build: .
+    ports:
+      - ${API_BIND:-127.0.0.1:4000}:4000
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - "${ENV_FILE:-/srv/araqandkahraman/env/backend.env}"
+    environment:
+      NODE_ENV: ${APP_NODE_ENV:-production}
+      PORT: 4000
+      MONGODB_URI: mongodb://mongo:27017/araq_kahraman?replicaSet=rs0
+      MONGODB_DB: araq_kahraman
+      MEDIA_DRIVER: local
+      MEDIA_STORAGE_ROOT: /data/media
+      TRUST_PROXY: "true"
+      COOKIE_SECURE: "true"
+      CORS_ORIGINS: https://araqandkahramanauctions.qa,https://www.araqandkahramanauctions.qa
+    volumes:
+      - "${MEDIA_DATA:-/srv/araqandkahraman/data/media}:/data/media"
+    command: ["sh", "-c", "node scripts/ensure-indexes.ts && node src/server.ts"]
+    restart: unless-stopped

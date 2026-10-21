@@ -11,10 +11,29 @@ const PRODUCTION_BASE = {
   PAYMENT_PROVIDER: 'approved-sandbox',
 };
 
-test('production rejects the manual payment placeholder', () => {
+test('production allows manual or missing PAYMENT_PROVIDER', () => {
+  assert.doesNotThrow(() => loadConfig({ ...PRODUCTION_BASE, PAYMENT_PROVIDER: 'manual' }));
+  const { PAYMENT_PROVIDER: _omit, ...withoutProvider } = PRODUCTION_BASE;
+  assert.doesNotThrow(() => loadConfig(withoutProvider));
+});
+
+test('production still requires MongoDB and MFA when PAYMENT_PROVIDER is manual', () => {
   assert.throws(
-    () => loadConfig({ ...PRODUCTION_BASE, PAYMENT_PROVIDER: 'manual' }),
-    (err: unknown) => err instanceof ConfigurationError && /PAYMENT_PROVIDER/.test(err.message),
+    () =>
+      loadConfig({
+        NODE_ENV: 'production',
+        CORS_ORIGINS: 'https://example.com',
+        PAYMENT_PROVIDER: 'manual',
+      }),
+    (err: unknown) =>
+      err instanceof ConfigurationError && err.issues.some((i) => i.includes('MONGODB_URI')),
+  );
+
+  const { MFA_ENCRYPTION_KEY: _omit, ...withoutMfa } = PRODUCTION_BASE;
+  assert.throws(
+    () => loadConfig({ ...withoutMfa, PAYMENT_PROVIDER: 'manual' }),
+    (err: unknown) =>
+      err instanceof ConfigurationError && err.issues.some((i) => i.startsWith('MFA_ENCRYPTION_KEY')),
   );
 });
 

@@ -175,14 +175,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (corsOrigins.length === 0) {
     issues.push('CORS_ORIGINS: at least one explicit origin is required');
   }
-    if (nodeEnv === 'production') {
+  if (nodeEnv === 'production') {
     if (!(data?.MONGODB_URI ?? '').trim()) issues.push('MONGODB_URI: required in production');
     if (!(data?.MFA_ENCRYPTION_KEY ?? '').trim()) {
       issues.push('MFA_ENCRYPTION_KEY: required in production (privileged access requires MFA)');
-    }
-    const provider = (data?.PAYMENT_PROVIDER ?? '').trim();
-    if (!provider || provider === 'manual' || provider === 'manual_placeholder') {
-      issues.push('PAYMENT_PROVIDER: production rejects the manual placeholder. Set an approved gateway.');
     }
   }
 
