@@ -3,6 +3,7 @@ import { COLLECTIONS } from '../../db/indexes.ts';
 import { BUSINESS_TIMEZONE, toIsoUtc } from '../../shared/time.ts';
 import { qatarMonthUtcBounds } from '../../shared/qatarCalendar.ts';
 import { publicVisibilityFilter } from '../listings/repository.ts';
+import { categoryImageUrl } from '../taxonomy/dto.ts';
 import { CATALOGUE_ROOTS } from '../taxonomy/models.ts';
 
 type Locale = 'en' | 'ar';
@@ -10,6 +11,7 @@ type Locale = 'en' | 'ar';
 export type CalendarGroup = {
   parentCategoryKey: string;
   parentCategoryName: string;
+  imageUrl: string | null;
   listingCount: number;
   endsAt: string;
   live: boolean;
@@ -119,13 +121,19 @@ export async function getAuctionCalendar(
   const categories = categoryKeys.length
     ? await db.collection(COLLECTIONS.categories)
       .find({ key: { $in: categoryKeys } })
-      .project({ key: 1, labels: 1, _id: 0 })
+      .project({ key: 1, labels: 1, imageAssetId: 1, _id: 0 })
       .toArray()
     : [];
   const nameByKey = new Map(
     categories.map((cat) => [
       String(cat.key),
       categoryName(cat.labels as { en?: { name?: string }; ar?: { name?: string } | null }, locale, String(cat.key)),
+    ]),
+  );
+  const imageUrlByKey = new Map(
+    categories.map((cat) => [
+      String(cat.key),
+      categoryImageUrl(String(cat.key), (cat as { imageAssetId?: string | null }).imageAssetId ?? null),
     ]),
   );
 
@@ -136,6 +144,7 @@ export async function getAuctionCalendar(
     groups.push({
       parentCategoryKey: key,
       parentCategoryName: nameByKey.get(key) ?? key,
+      imageUrl: imageUrlByKey.get(key) ?? null,
       listingCount: row.listingRefs.length,
       endsAt: toIsoUtc(row.endsAt),
       live: row.liveCount > 0,

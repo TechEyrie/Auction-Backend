@@ -1,5 +1,13 @@
 import type { CategoryDoc } from './models.ts';
 
+export function categoryImageUrl(key: string, imageAssetId: string | null | undefined): string | null {
+  return imageAssetId ? `/api/catalog/categories/${key}/image` : null;
+}
+
+function resolvedImageAssetId(category: CategoryDoc): string | null {
+  return category.imageAssetId ?? null;
+}
+
 /** Public consumer view: only active categories, only publicly meaningful fields. */
 export type PublicCategoryDto = {
   key: string;
@@ -8,12 +16,14 @@ export type PublicCategoryDto = {
   name: string;
   description: string | null;
   icon: string | null;
+  imageUrl: string | null;
   order: number;
   listingMethods: CategoryDoc['listingMethods'];
   attributeSchemaVersion: number | null;
 };
 
 export type AdminCategoryDto = PublicCategoryDto & {
+  imageAssetId: string | null;
   active: boolean;
   hierarchyVersion: number;
   labels: CategoryDoc['labels'];
@@ -34,6 +44,7 @@ export function toPublicCategoryDto(category: CategoryDoc, locale: 'en' | 'ar' =
     name: label.name,
     description: label.description ?? null,
     icon: category.icon,
+    imageUrl: categoryImageUrl(category.key, resolvedImageAssetId(category)),
     order: category.order,
     listingMethods: category.listingMethods,
     attributeSchemaVersion: category.currentAttributeSchemaVersion,
@@ -43,6 +54,7 @@ export function toPublicCategoryDto(category: CategoryDoc, locale: 'en' | 'ar' =
 export function toAdminCategoryDto(category: CategoryDoc): AdminCategoryDto {
   return {
     ...toPublicCategoryDto(category),
+    imageAssetId: resolvedImageAssetId(category),
     active: category.active,
     hierarchyVersion: category.hierarchyVersion,
     labels: category.labels,

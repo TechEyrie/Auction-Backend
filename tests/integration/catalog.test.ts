@@ -9,6 +9,7 @@ import { startServer, type RunningServer } from '../../src/server.ts';
 import { silentLogger, stubMediaStorage } from '../helpers/context.ts';
 import { TestClient } from '../helpers/client.ts';
 import { createAdminFixture, createCustomerFixture } from '../helpers/authFixture.ts';
+import { png } from '../helpers/images.ts';
 
 let replSet: MongoMemoryReplSet;
 let handle: DbHandle;
@@ -592,6 +593,86 @@ test('D07 locations validate identifiers and coordinates and apply public precis
   assert.ok(!(await publicAfter.json() as { locations: Array<{ key: string }> }).locations.some((l) => l.key === 'qa-doha-al-sadd'));
   const adminList = await admin.get('/api/admin/locations');
   assert.ok((adminList.body as { locations: Array<{ key: string }> }).locations.some((l) => l.key === 'qa-doha-al-sadd'));
+});
+
+test('category photo upload, public serve, replace and permission checks', async () => {
+  const categoryKey = 'perfume';
+  await admin.post('/api/admin/categories', {
+    key: categoryKey,
+    parentKey: null,
+    nameEn: 'Perfume',
+    listingMethods: ['auction', 'fixed_price'],
+    active: true,
+  });
+
+  const before = await fetch(`${baseUrl}/api/catalog/categories/${categoryKey}/image`);
+  assert.equal(before.status, 404);
+
+  const imageBytes = png(44, 36);
+  const uploadHeaders = {
+    'content-type': 'image/png',
+    'x-csrf-token': admin.csrfToken() ?? '',
+    cookie: `sid=${admin.cookie('sid')}; csrf=${admin.csrfToken()}`,
+  };
+
+  const customerDenied = await fetch(`${baseUrl}/api/admin/categories/${categoryKey}/image`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'image/png',
+      'x-csrf-token': customer.csrfToken() ?? '',
+      cookie: `sid=${customer.cookie('sid')}; csrf=${customer.csrfToken()}`,
+    },
+    body: new Uint8Array(imageBytes),
+  });
+  assert.equal(customerDenied.status, 403);
+
+  const uploaded = await fetch(`${baseUrl}/api/admin/categories/${categoryKey}/image`, {
+    method: 'POST',
+    headers: uploadHeaders,
+    body: new Uint8Array(imageBytes),
+  });
+  const uploadedText = await uploaded.text();
+  assert.equal(uploaded.status, 201, uploadedText);
+  const uploadedBody = JSON.parse(uploadedText) as {
+    category: { imageAssetId: string; imageUrl: string };
+  };
+  assert.ok(uploadedBody.category.imageAssetId);
+  assert.equal(uploadedBody.category.imageUrl, `/api/catalog/categories/${categoryKey}/image`);
+
+  const publicTree = await fetch(`${baseUrl}/api/catalog/categories`);
+  const publicCategory = (await publicTree.json() as { categories: Array<{ key: string; imageUrl: string | null }> }).categories
+    .find((c) => c.key === categoryKey);
+  assert.ok(publicCategory);
+  assert.equal(publicCategory!.imageUrl, `/api/catalog/categories/${categoryKey}/image`);
+
+  const served = await fetch(`${baseUrl}/api/catalog/categories/${categoryKey}/image`);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), imageBytes);
+
+  const replacement = png(50, 40);
+  const replaced = await fetch(`${baseUrl}/api/admin/categories/${categoryKey}/image`, {
+    method: 'POST',
+    headers: uploadHeaders,
+    body: new Uint8Array(replacement),
+  });
+  assert.equal(replaced.status, 201);
+  const servedAgain = await fetch(`${baseUrl}/api/catalog/categories/${categoryKey}/image`);
+  assert.deepEqual(Buffer.from(await servedAgain.arrayBuffer()), replacement);
+
+  const cleared = await admin.request('DELETE', `/api/admin/categories/${categoryKey}/image`, {
+    reason: 'Removed category photo',
+  });
+  assert.equal(cleared.status, 200);
+  assert.equal((await fetch(`${baseUrl}/api/catalog/categories/${categoryKey}/image`)).status, 404);
+
+  const audits = await handle.db.collection(COLLECTIONS.auditLogs).find({
+    targetType: 'category',
+    targetId: categoryKey,
+    action: { $in: ['category.image_set', 'category.image_cleared'] },
+  }).toArray();
+  assert.ok(audits.some((entry) => entry.action === 'category.image_set'));
+  assert.ok(audits.some((entry) => entry.action === 'category.image_cleared'));
 });
 
 test('D12 public taxonomy and admin taxonomy come from the same records', async () => {

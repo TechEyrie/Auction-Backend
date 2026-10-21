@@ -1486,3 +1486,37 @@ test('endingSoonHours lists live auctions closing inside the window', async () =
   const refs = ((await listed.json()) as { listings: Array<{ listingReference: string }> }).listings.map((row) => row.listingReference);
   assert.ok(refs.includes(published.reference));
 });
+
+test('endsOn filters auction listings ending on a Qatar civil day', async () => {
+  const onDay = await createPublishedListing({
+    categoryKey: 'clothes-thobes',
+    titleEn: `Ends on 2026-10-15 ${Date.now()}`,
+    attributes: { item_condition: 'new', brand_name: 'Day15' },
+  });
+  const otherDay = await createPublishedListing({
+    categoryKey: 'clothes-thobes',
+    titleEn: `Ends on 2026-10-16 ${Date.now()}`,
+    attributes: { item_condition: 'new', brand_name: 'Day16' },
+  });
+  const otherCategory = await createPublishedListing({
+    categoryKey: 'cars',
+    titleEn: `Ends on 2026-10-15 other cat ${Date.now()}`,
+    attributes: { make: 'toyota', model: 'Day15' },
+  });
+  const starts = new Date('2026-10-01T12:00:00+03:00');
+  await openLot(onDay.reference, starts, new Date('2026-10-15T14:00:00+03:00'));
+  await openLot(otherDay.reference, starts, new Date('2026-10-16T14:00:00+03:00'));
+  await openLot(otherCategory.reference, starts, new Date('2026-10-15T18:00:00+03:00'));
+
+  const listed = await fetch(
+    `${baseUrl}/api/listings?method=auction&category=clothes-thobes&endsOn=2026-10-15&limit=48`,
+  );
+  assert.equal(listed.status, 200);
+  const refs = ((await listed.json()) as { listings: Array<{ listingReference: string }> }).listings.map(
+    (row) => row.listingReference,
+  );
+  assert.deepEqual(refs, [onDay.reference]);
+
+  const badMethod = await fetch(`${baseUrl}/api/listings?method=enquiry&endsOn=2026-10-15`);
+  assert.equal(badMethod.status, 422);
+});

@@ -74,6 +74,8 @@ export type PublicListQuery = {
   liveAuctionListingReferences?: string[];
   /** Live auctions ending within this many hours (handled in service, not buildPublicFilter). */
   endingSoonHours?: number;
+  /** Qatar civil date (YYYY-MM-DD); auction lots ending that day (handled in service). */
+  endsOn?: string;
   /** Restrict to these references (exact $in); order is applied in service when needed. */
   listingReferences?: string[];
 };

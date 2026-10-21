@@ -1,8 +1,12 @@
-import { Router } from 'express';
+import { Router, raw } from 'express';
 import { z } from 'zod';
+import type { AppConfig } from '../../config/index.ts';
 import { parseInput } from '../../shared/validate.ts';
+import { AppError } from '../../shared/errors.ts';
 import { requireCapability } from '../auth/middleware.ts';
-import { LISTING_METHODS } from './models.ts';
+import { ALLOWED_IMAGE_MIME } from '../media/imageInfo.ts';
+import type { MediaService } from '../media/service.ts';
+import { categoryMediaCollectionKey, LISTING_METHODS } from './models.ts';
 import { toAdminCategoryDto, toPublicCategoryDto } from './dto.ts';
 import { CATEGORY_ICON_KEYS, CATEGORY_ICONS } from './icons.ts';
 import { createTaxonomyService, type TaxonomyDeps } from './service.ts';
@@ -30,6 +34,11 @@ const patchSchema = writeSchema.partial().extend({
 
 const reasonSchema = z.object({ reason: z.string().min(3).max(300) });
 
+export type TaxonomyRouterDeps = TaxonomyDeps & {
+  media: MediaService;
+  config: AppConfig;
+};
+
 /** Public icon catalogue for admin pickers and documentation. */
 export function publicCategoryIconsRouter(): Router {
   const router = Router();
@@ -41,9 +50,35 @@ export function publicCategoryIconsRouter(): Router {
 }
 
 /** Public taxonomy: active categories only. The same records the admin edits. */
-export function publicTaxonomyRouter(deps: TaxonomyDeps): Router {
+export function publicTaxonomyRouter(deps: TaxonomyRouterDeps): Router {
   const router = Router();
   const service = createTaxonomyService(deps);
+  const { media } = deps;
+
+  router.get('/:key/image', async (req, res, next) => {
+    try {
+      const key = String(req.params.key);
+      const category = await service.getByKey(key);
+      if (!category || !category.active) throw new AppError('NOT_FOUND', 'Category image not found');
+      const imageAssetId = category.imageAssetId ?? null;
+      if (!imageAssetId) throw new AppError('NOT_FOUND', 'Category image not found');
+      const asset = await media.findReadyAsset(imageAssetId);
+      if (!asset || asset.collectionKey !== categoryMediaCollectionKey(key)) {
+        throw new AppError('NOT_FOUND', 'Category image not found');
+      }
+      const bytes = await media.readBytes(asset);
+      res.setHeader('Content-Type', asset.mime ?? 'application/octet-stream');
+      res.setHeader('Content-Disposition', 'inline');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.status(200).end(bytes);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get('/', async (req, res, next) => {
     try {
       const locale = req.query.locale === 'ar' ? 'ar' : 'en';
@@ -60,9 +95,10 @@ export function publicTaxonomyRouter(deps: TaxonomyDeps): Router {
   return router;
 }
 
-export function adminTaxonomyRouter(deps: TaxonomyDeps): Router {
+export function adminTaxonomyRouter(deps: TaxonomyRouterDeps): Router {
   const router = Router();
   const service = createTaxonomyService(deps);
+  const { media, config } = deps;
 
   router.get('/', requireCapability('inventory.manage'), async (req, res, next) => {
     try {
@@ -97,6 +133,67 @@ export function adminTaxonomyRouter(deps: TaxonomyDeps): Router {
         expectedHierarchyVersion ?? null,
         { reference: req.auth!.user.publicReference, requestId: req.requestId ?? 'n/a' },
       );
+      res.json({ category: toAdminCategoryDto(category) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post(
+    '/:key/image',
+    requireCapability('inventory.manage'),
+    raw({
+      type: ALLOWED_IMAGE_MIME.map((mime) => mime),
+      limit: config.mediaMaxBytes,
+    }),
+    async (req, res, next) => {
+      try {
+        const key = String(req.params.key);
+        const current = await service.getByKey(key);
+        if (!current) throw new AppError('NOT_FOUND', 'Category not found');
+        const collectionKey = categoryMediaCollectionKey(key);
+        const priorId = current.imageAssetId ?? null;
+        if (priorId) {
+          await media.remove(priorId, 'Replaced category photo', {
+            reference: req.auth!.user.publicReference,
+            requestId: req.requestId ?? 'n/a',
+          });
+        }
+        const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+        const asset = await media.upload({
+          bytes,
+          declaredMime: req.header('content-type') ?? '',
+          collectionKey,
+          actor: { reference: req.auth!.user.publicReference, requestId: req.requestId ?? 'n/a' },
+        });
+        const category = await service.setImageAsset(key, asset.assetId, {
+          reference: req.auth!.user.publicReference,
+          requestId: req.requestId ?? 'n/a',
+        });
+        res.status(201).json({ category: toAdminCategoryDto(category) });
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
+
+  router.delete('/:key/image', requireCapability('inventory.manage'), async (req, res, next) => {
+    try {
+      const key = String(req.params.key);
+      const body = parseInput(reasonSchema, req.body);
+      const current = await service.getByKey(key);
+      if (!current) throw new AppError('NOT_FOUND', 'Category not found');
+      const priorId = current.imageAssetId ?? null;
+      if (priorId) {
+        await media.remove(priorId, body.reason, {
+          reference: req.auth!.user.publicReference,
+          requestId: req.requestId ?? 'n/a',
+        });
+      }
+      const category = await service.clearImageAsset(key, {
+        reference: req.auth!.user.publicReference,
+        requestId: req.requestId ?? 'n/a',
+      }, body.reason);
       res.json({ category: toAdminCategoryDto(category) });
     } catch (err) {
       next(err);

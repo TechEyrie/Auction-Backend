@@ -17,6 +17,8 @@ export type CategoryDoc = {
   depth: number;
   labels: { en: LocalizedText; ar?: LocalizedText | null };
   icon: string | null;
+  /** Ready media asset in collection `category_${key}`; missing on legacy rows reads as null. */
+  imageAssetId: string | null;
   order: number;
   active: boolean;
   listingMethods: ListingMethod[];
@@ -61,4 +63,8 @@ export function isCatalogueCategory(key: string, ancestors: readonly string[]): 
 
 export function isSuspendedCategory(key: string, ancestors: readonly string[]): boolean {
   return !isCatalogueCategory(key, ancestors);
+}
+
+export function categoryMediaCollectionKey(key: string): string {
+  return `category_${key}`;
 }

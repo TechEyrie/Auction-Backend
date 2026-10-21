@@ -35,6 +35,7 @@ const publicQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(1000).default(1),
   limit: z.coerce.number().int().min(1).max(MAX_PUBLIC_PAGE_SIZE).default(12),
   endingSoonHours: z.coerce.number().int().min(1).max(24).optional(),
+  endsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 const listingReferenceSchema = z.string().regex(/^l_[A-Za-z0-9_-]{6,32}$/, 'invalid listing reference');
@@ -111,7 +112,8 @@ export function publicListingRouter(deps: ListingRouterDeps): Router {
       const page = await service.listPublic({
         ...(query.q ? { search: query.q } : {}),
         ...(query.category ? { categoryKeys: [query.category.toLowerCase()] } : {}),
-        ...(query.method ? { method: query.method } : {}),
+        ...(query.method ? { method: query.method } : query.endsOn ? { method: 'auction' as ListingMethod } : {}),
+        ...(query.endsOn ? { endsOn: query.endsOn } : {}),
         ...(query.condition ? { condition: query.condition } : {}),
         ...(query.country ? { countryCode: query.country.toUpperCase() } : {}),
         ...(query.city ? { cityKey: query.city.toLowerCase() } : {}),
@@ -147,6 +149,7 @@ export function publicListingRouter(deps: ListingRouterDeps): Router {
           featured: query.featured === 'true',
           audience: query.audience ?? null,
           endingSoonHours: query.endingSoonHours ?? null,
+          endsOn: query.endsOn ?? null,
         },
       });
     } catch (err) {

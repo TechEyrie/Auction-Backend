@@ -12,6 +12,7 @@ import type { SellerWithId } from '../sellers/models.ts';
 import { createTaxonomyService } from '../taxonomy/service.ts';
 import type { CategoryWithId } from '../taxonomy/models.ts';
 import { COLLECTIONS } from '../../db/indexes.ts';
+import { qatarDayUtcBounds } from '../../shared/qatarCalendar.ts';
 import type { LocationDoc } from '../locations/service.ts';
 import {
   mediaCollectionKey,
@@ -640,6 +641,35 @@ export function createListingService(deps: ListingDeps) {
           for (const descendant of await descendantKeys(key)) keys.add(descendant);
         }
         expanded.categoryKeys = [...keys];
+      }
+
+      if (query.endsOn) {
+        if (query.method && query.method !== 'auction') {
+          throw fieldError('endsOn', 'only valid with auction listings');
+        }
+        let bounds: { start: Date; endExclusive: Date };
+        try {
+          bounds = qatarDayUtcBounds(query.endsOn);
+        } catch {
+          throw fieldError('endsOn', 'expected YYYY-MM-DD');
+        }
+        const rows = await db
+          .collection(COLLECTIONS.auctions)
+          .find({
+            status: { $in: ['live', 'scheduled'] },
+            endsAt: { $gte: bounds.start, $lt: bounds.endExclusive },
+          })
+          .project({ listingReference: 1 })
+          .toArray();
+        const refs = rows
+          .map((row) => row.listingReference)
+          .filter((ref): ref is string => typeof ref === 'string');
+        if (refs.length === 0) {
+          return { items: [], page: query.page, limit: query.limit, total: 0, totalPages: 1 };
+        }
+        expanded.listingReferences = refs;
+        expanded.method = 'auction';
+        return listPublicListings(db, expanded);
       }
 
       if (query.endingSoonHours !== undefined) {

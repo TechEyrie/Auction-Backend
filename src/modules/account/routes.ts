@@ -140,7 +140,7 @@ export function adminContentRouter(deps: { db: Db }): Router {
   router.get('/enquiries', requireAuth(), requireCapability('content.manage'), async (_req, res, next) => {
     try {
       const items = await deps.db.collection(COLLECTIONS.enquiries).find({}).sort({ createdAt: -1 }).limit(50)
-        .project({ reference: 1, name: 1, email: 1, subject: 1, message: 1, status: 1, createdAt: 1, _id: 0 }).toArray();
+        .project({ reference: 1, name: 1, email: 1, subject: 1, message: 1, listingReference: 1, status: 1, createdAt: 1, _id: 0 }).toArray();
       res.json({ enquiries: items });
     } catch (err) { next(err); }
   });

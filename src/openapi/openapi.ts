@@ -156,7 +156,13 @@ export const openApiDocument: OpenApiDocument = {
       get: {
         summary: 'Active category tree (same records the admin edits)',
         parameters: [{ name: 'locale', in: 'query', schema: { type: 'string', enum: ['en', 'ar'] } }],
-        responses: { '200': { description: 'Public categories' } },
+        responses: { '200': { description: 'Public categories (imageUrl when a photo is set)' } },
+      },
+    },
+    '/api/catalog/categories/{key}/image': {
+      get: {
+        summary: 'Public category photo bytes (active category with a ready asset only)',
+        responses: { '200': { description: 'Image bytes' }, '404': errorResponse },
       },
     },
     '/api/admin/categories': {
@@ -174,6 +180,16 @@ export const openApiDocument: OpenApiDocument = {
     },
     '/api/admin/categories/{key}/restore': {
       post: { summary: 'Restore an archived category', responses: { '200': { description: 'Restored category' } } },
+    },
+    '/api/admin/categories/{key}/image': {
+      post: {
+        summary: 'Upload or replace the category photo (raw image body, jpeg/png/webp)',
+        responses: { '201': { description: 'Category with imageAssetId and imageUrl' }, '404': errorResponse },
+      },
+      delete: {
+        summary: 'Clear the category photo and delete the stored asset',
+        responses: { '200': { description: 'Category with image cleared' }, '404': errorResponse },
+      },
     },
 
     // ---- Phase 04: versioned attribute schemas ----
@@ -288,6 +304,7 @@ export const openApiDocument: OpenApiDocument = {
           { name: 'sort', in: 'query', schema: { type: 'string', enum: ['recent', 'title', 'featured'] } },
           { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 60, default: 12 } },
+          { name: 'endsOn', in: 'query', schema: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, description: 'Qatar civil date (YYYY-MM-DD); auction lots ending that day' },
         ],
         responses: { '200': { description: 'Paged public listings' }, '422': errorResponse },
       },

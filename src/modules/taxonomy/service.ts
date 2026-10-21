@@ -115,6 +115,7 @@ export function createTaxonomyService(deps: TaxonomyDeps) {
             ar: input.nameAr ? { name: input.nameAr.trim(), description: input.descriptionAr?.trim() ?? null } : null,
           },
           icon: input.icon ?? DEFAULT_CATEGORY_ICON,
+          imageAssetId: null,
           order: input.order ?? 0,
           active: input.active ?? true,
           listingMethods: methods,
@@ -311,6 +312,78 @@ export function createTaxonomyService(deps: TaxonomyDeps) {
 
     async getByKey(key: string): Promise<CategoryWithId | null> {
       return categories().findOne({ key });
+    },
+
+    async setImageAsset(
+      key: string,
+      imageAssetId: string,
+      actor: { reference: string; requestId: string },
+    ): Promise<CategoryWithId> {
+      const targetKey = assertKey(key);
+      const updated = await withTransaction(async (session) => {
+        const current = await categories(session).findOne({ key: targetKey });
+        if (!current) throw notFound('Category not found');
+        const result = await categories(session).findOneAndUpdate(
+          { key: targetKey, hierarchyVersion: current.hierarchyVersion },
+          {
+            $set: {
+              imageAssetId,
+              updatedAt: new Date(),
+              updatedBy: actor.reference,
+              hierarchyVersion: current.hierarchyVersion + 1,
+            },
+          },
+          { returnDocument: 'after', session },
+        );
+        if (!result) throw conflict('This category changed while you were editing it', { reason: 'stale_version' });
+        return result;
+      });
+      await recordAudit(db, {
+        actorId: actor.reference,
+        action: 'category.image_set',
+        targetType: 'category',
+        targetId: targetKey,
+        requestId: actor.requestId,
+        changeSummary: { imageAssetId },
+        reason: null,
+      });
+      return updated;
+    },
+
+    async clearImageAsset(
+      key: string,
+      actor: { reference: string; requestId: string },
+      reason: string,
+    ): Promise<CategoryWithId> {
+      const targetKey = assertKey(key);
+      const updated = await withTransaction(async (session) => {
+        const current = await categories(session).findOne({ key: targetKey });
+        if (!current) throw notFound('Category not found');
+        const result = await categories(session).findOneAndUpdate(
+          { key: targetKey, hierarchyVersion: current.hierarchyVersion },
+          {
+            $set: {
+              imageAssetId: null,
+              updatedAt: new Date(),
+              updatedBy: actor.reference,
+              hierarchyVersion: current.hierarchyVersion + 1,
+            },
+          },
+          { returnDocument: 'after', session },
+        );
+        if (!result) throw conflict('This category changed while you were editing it', { reason: 'stale_version' });
+        return result;
+      });
+      await recordAudit(db, {
+        actorId: actor.reference,
+        action: 'category.image_cleared',
+        targetType: 'category',
+        targetId: targetKey,
+        requestId: actor.requestId,
+        changeSummary: { imageAssetId: null },
+        reason,
+      });
+      return updated;
     },
 
     async setCurrentSchemaVersion(

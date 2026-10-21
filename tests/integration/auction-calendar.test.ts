@@ -235,6 +235,7 @@ test('two published lots same parent and Qatar day aggregate with min endsAt', a
       date: string;
       groups: Array<{
         parentCategoryKey: string;
+        imageUrl: string | null;
         listingCount: number;
         endsAt: string;
         live: boolean;
@@ -247,8 +248,36 @@ test('two published lots same parent and Qatar day aggregate with min endsAt', a
   assert.ok(group);
   assert.equal(group.listingCount, 2);
   assert.equal(group.endsAt, OCT_15_EARLY);
-  assert.equal('imageUrl' in group, false);
+  assert.equal(group.imageUrl, null);
   assert.equal(group.live, false);
+});
+
+test('calendar group imageUrl points at public category photo when set', async () => {
+  const bytes = png(48, 40);
+  const upload = await fetch(`${baseUrl}/api/admin/categories/clothes-thobes/image`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'image/png',
+      'x-csrf-token': admin.csrfToken() ?? '',
+      cookie: `sid=${admin.cookie('sid')}; csrf=${admin.csrfToken()}`,
+    },
+    body: new Uint8Array(bytes),
+  });
+  assert.equal(upload.status, 201, await upload.text());
+
+  const ref = await publishAuctionListing('Category photo calendar lot');
+  await scheduleLot(ref, '2026-10-01T00:00:00.000Z', OCT_20);
+
+  const cal = await fetch(calendarUrl());
+  assert.equal(cal.status, 200);
+  const body = (await cal.json()) as {
+    days: Array<{ date: string; groups: Array<{ parentCategoryKey: string; imageUrl: string | null }> }>;
+  };
+  const day = body.days.find((row) => row.date === '2026-10-20');
+  assert.ok(day);
+  const group = day!.groups.find((g) => g.parentCategoryKey === 'clothes-thobes');
+  assert.ok(group);
+  assert.equal(group!.imageUrl, '/api/catalog/categories/clothes-thobes/image');
 });
 
 test('invalid month returns 422', async () => {

@@ -63,10 +63,15 @@ export function createApp(deps: AppDeps): Express {
   app.use('/api/users', usersRouter({ db: deps.db }));
 
   const catalogDeps = { db: deps.db, logger: deps.logger, withTransaction: deps.withTransaction };
+  const taxonomyDeps = {
+    ...catalogDeps,
+    media: createMediaService({ ...catalogDeps, config: deps.config, storage: deps.mediaStorage }),
+    config: deps.config,
+  };
   const locationDeps = { db: deps.db, logger: deps.logger };
 
   // Public catalog reads: the same records the admin edits (no second source of truth).
-  app.use('/api/catalog/categories', publicTaxonomyRouter(catalogDeps));
+  app.use('/api/catalog/categories', publicTaxonomyRouter(taxonomyDeps));
   app.use('/api/catalog/category-icons', publicCategoryIconsRouter());
   app.use('/api/catalog/locations', publicLocationRouter(locationDeps));
   app.use('/api/catalog/sellers', publicSellerRouter(locationDeps));
@@ -76,7 +81,7 @@ export function createApp(deps: AppDeps): Express {
     '/api/admin/sellers',
     adminSellerRouter(locationDeps),
   );
-  app.use('/api/admin/categories', adminTaxonomyRouter(catalogDeps));
+  app.use('/api/admin/categories', adminTaxonomyRouter(taxonomyDeps));
   app.use('/api/admin/attribute-schemas', adminAttributeRouter(catalogDeps));
   app.use('/api/admin/locations', adminLocationRouter(locationDeps));
   app.use('/api/admin/media', adminMediaRouter({ ...catalogDeps, config: deps.config, storage: deps.mediaStorage }));
@@ -85,7 +90,7 @@ export function createApp(deps: AppDeps): Express {
   // rather than reaching into media collections themselves.
   const listingDeps = {
     ...catalogDeps,
-    media: createMediaService({ ...catalogDeps, config: deps.config, storage: deps.mediaStorage }),
+    media: taxonomyDeps.media,
   };
   app.use('/api/payments', paymentRouter({ db: deps.db, config: deps.config }));
   app.use('/api/orders', orderRouter({ db: deps.db }));
