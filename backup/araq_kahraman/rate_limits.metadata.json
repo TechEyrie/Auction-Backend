@@ -1,1 +1,0 @@
-{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"expiresAt":{"$numberInt":"1"}},"name":"ttl_rate_window","expireAfterSeconds":{"$numberInt":"0"}}],"uuid":"26bf686e956f4734a3698a7171195122","collectionName":"rate_limits","type":"collection"}
