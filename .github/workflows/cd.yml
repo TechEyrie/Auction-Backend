@@ -45,7 +45,6 @@ jobs:
           rsync -avz --delete \
             --exclude 'node_modules' \
             --exclude '.env' \
-            --exclude 'backup' \
             --exclude '.cd-sim' \
             --exclude '.git' \
             -e ssh \
@@ -62,3 +61,7 @@ jobs:
       - name: Docker Compose up
         run: |
           ssh vps 'cd /srv/araqandkahraman/backend && docker compose -f docker-compose.prod.yml up -d --build'
+
+      - name: One-time Mongo restore
+        run: |
+          ssh vps 'chmod +x /srv/araqandkahraman/backend/scripts/restore-once.sh && /srv/araqandkahraman/backend/scripts/restore-once.sh'
