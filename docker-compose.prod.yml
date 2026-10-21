@@ -37,8 +37,11 @@ services:
       PORT: 4000
       MONGODB_URI: mongodb://mongo:27017/araq_kahraman?replicaSet=rs0
       MONGODB_DB: araq_kahraman
-      MEDIA_DRIVER: local
+      # Do not pin MEDIA_DRIVER here: APP_ENV / backend.env must win (ImageKit is
+      # the live listing store). Pinning `local` without the opt-in below refused
+      # every production upload, so category photos never persisted.
       MEDIA_STORAGE_ROOT: /data/media
+      MEDIA_ALLOW_LOCAL_FILESYSTEM: "true"
       TRUST_PROXY: "true"
       COOKIE_SECURE: "true"
       CORS_ORIGINS: https://araqandkahramanauctions.qa,https://www.araqandkahramanauctions.qa

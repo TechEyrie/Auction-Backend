@@ -49,6 +49,19 @@ export async function verifyCustomerEmail(client: TestClient, devVerifyToken: st
   if (res.status !== 200) throw new Error(`email verify failed: ${JSON.stringify(res.body)}`);
 }
 
+/** Complete the emailed login OTP for a customer session (dev adapter returns the code). */
+export async function completeCustomerLoginOtp(client: TestClient, devLoginOtp?: string): Promise<void> {
+  let code = devLoginOtp;
+  if (!code) {
+    const resend = await client.post('/api/auth/login/otp/resend', {});
+    if (resend.status !== 200) throw new Error(`login OTP resend failed: ${JSON.stringify(resend.body)}`);
+    code = (resend.body as { devLoginOtp?: string }).devLoginOtp;
+  }
+  if (!code) throw new Error('customer fixture missing devLoginOtp');
+  const res = await client.post('/api/auth/login/otp', { code });
+  if (res.status !== 200) throw new Error(`login OTP failed: ${JSON.stringify(res.body)}`);
+}
+
 /** Enroll and confirm TOTP so customer-only MFA gates pass. */
 export async function satisfyCustomerMfa(client: TestClient): Promise<string> {
   const enroll = await client.post('/api/auth/mfa/enroll', {});
@@ -78,7 +91,8 @@ export async function createCustomerFixture(options: {
   if (register.status !== 201) throw new Error(`customer fixture failed: ${JSON.stringify(register.body)}`);
   const devVerifyToken = (register.body as { devVerifyToken?: string }).devVerifyToken;
   if (!devVerifyToken) throw new Error('customer fixture missing devVerifyToken');
+  const devLoginOtp = (register.body as { devLoginOtp?: string }).devLoginOtp;
   await verifyCustomerEmail(client, devVerifyToken);
-  await satisfyCustomerMfa(client);
+  await completeCustomerLoginOtp(client, devLoginOtp);
   return client;
 }

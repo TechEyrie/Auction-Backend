@@ -66,6 +66,11 @@ export function publicTaxonomyRouter(deps: TaxonomyRouterDeps): Router {
       if (!asset || asset.collectionKey !== categoryMediaCollectionKey(key)) {
         throw new AppError('NOT_FOUND', 'Category image not found');
       }
+      if (asset.publicUrl) {
+        res.setHeader('Cache-Control', 'public, max-age=300');
+        res.redirect(302, asset.publicUrl);
+        return;
+      }
       const bytes = await media.readBytes(asset);
       res.setHeader('Content-Type', asset.mime ?? 'application/octet-stream');
       res.setHeader('Content-Disposition', 'inline');

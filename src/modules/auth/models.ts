@@ -61,7 +61,7 @@ export type SessionDoc = {
 
 export type SessionWithId = SessionDoc & { _id: ObjectId };
 
-export type ChallengePurpose = 'password_reset' | 'phone_verify' | 'email_verify';
+export type ChallengePurpose = 'password_reset' | 'phone_verify' | 'email_verify' | 'login_otp';
 
 export type ChallengeDoc = {
   purpose: ChallengePurpose;

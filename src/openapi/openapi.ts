@@ -82,7 +82,26 @@ export const openApiDocument: OpenApiDocument = {
       },
     },
     '/api/auth/login': {
-      post: { summary: 'Sign in', responses: { '200': { description: 'Session issued' }, '401': errorResponse } },
+      post: {
+        summary: 'Sign in',
+        responses: {
+          '200': { description: 'Session issued; loginOtpSent when email OTP is required' },
+          '401': errorResponse,
+          '422': errorResponse,
+        },
+      },
+    },
+    '/api/auth/login/otp': {
+      post: {
+        summary: 'Complete sign-in with the emailed 6-digit login OTP',
+        responses: { '200': { description: 'MFA satisfied; session rotated' }, '422': errorResponse },
+      },
+    },
+    '/api/auth/login/otp/resend': {
+      post: {
+        summary: 'Resend the login OTP email',
+        responses: { '200': { description: 'New code sent' }, '422': errorResponse, '429': errorResponse },
+      },
     },
     '/api/auth/logout': {
       post: { summary: 'Sign out', responses: { '200': { description: 'Session revoked' }, '403': errorResponse } },
@@ -359,6 +378,12 @@ export const openApiDocument: OpenApiDocument = {
       post: {
         summary: 'Archive with a reason: history is preserved and public visibility is revoked',
         responses: { '200': { description: 'Archived listing' }, '403': errorResponse, '409': errorResponse, '422': errorResponse },
+      },
+    },
+    '/api/admin/listings/{ref}/duplicate': {
+      post: {
+        summary: 'Duplicate as a new unsold draft; the source listing is unchanged',
+        responses: { '201': { description: 'Cloned listing' }, '403': errorResponse, '404': errorResponse, '422': errorResponse },
       },
     },
   },

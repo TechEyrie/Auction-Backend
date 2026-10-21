@@ -79,8 +79,11 @@ export function authRouter(deps: AuthRouterDeps): Router {
       setCsrfCookie(res, config, result.session.csrfToken);
       res.status(201).json({
         user: result.user,
+        mfaRequired: result.mfaRequired,
         returnTo: safeInternalPath(body.returnTo),
+        ...(result.loginOtpSent ? { loginOtpSent: true as const } : {}),
         ...(result.verifyToken && !config.isProduction ? { devVerifyToken: result.verifyToken } : {}),
+        ...(result.devLoginOtp && !config.isProduction ? { devLoginOtp: result.devLoginOtp } : {}),
       });
     } catch (err) {
       next(err);
@@ -104,6 +107,8 @@ export function authRouter(deps: AuthRouterDeps): Router {
         user: result.user,
         mfaRequired: result.mfaRequired,
         returnTo: safeInternalPath(body.returnTo),
+        ...(result.loginOtpSent ? { loginOtpSent: true as const } : {}),
+        ...(result.devLoginOtp && !config.isProduction ? { devLoginOtp: result.devLoginOtp } : {}),
       });
     } catch (err) {
       next(err);
@@ -191,6 +196,32 @@ export function authRouter(deps: AuthRouterDeps): Router {
       const body = parseInput(z.object({ code: z.string().min(6).max(6) }), req.body);
       const result = await service.confirmMfaEnrollment(req.auth!.user, req.auth!.session, body.code, key);
       res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  const loginOtpSchema = z.object({ code: z.string().regex(/^\d{6}$/) });
+
+  router.post('/login/otp', requireAuth(), async (req, res, next) => {
+    try {
+      const body = parseInput(loginOtpSchema, req.body);
+      const rotated = await service.completeLoginOtp(req.auth!.user, req.auth!.session, body.code);
+      setSessionCookie(res, config, rotated.token);
+      setCsrfCookie(res, config, rotated.csrfToken);
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/login/otp/resend', requireAuth(), requireActiveUser(), limit('forgot'), async (req, res, next) => {
+    try {
+      const devLoginOtp = await service.resendLoginOtp(req.auth!.user, clientIp(req));
+      res.json({
+        ok: true,
+        ...(devLoginOtp && !config.isProduction ? { devLoginOtp } : {}),
+      });
     } catch (err) {
       next(err);
     }

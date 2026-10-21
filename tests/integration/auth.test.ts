@@ -10,7 +10,7 @@ import { TestClient } from '../helpers/client.ts';
 import { sha256Hex } from '../../src/shared/crypto.ts';
 import { generateTotp } from '../../src/shared/totp.ts';
 import { bootstrapSuperAdmin } from '../../src/modules/admin/bootstrap.ts';
-import { satisfyCustomerMfa } from '../helpers/authFixture.ts';
+import { completeCustomerLoginOtp, satisfyCustomerMfa } from '../helpers/authFixture.ts';
 import { mailCaptures } from '../../src/shared/mail.ts';
 
 let replSet: MongoMemoryReplSet;
@@ -27,8 +27,6 @@ const FIXTURE_PW = 'fixture pass 123';
 /** Matches the deployment token from `testEnv()`; bootstrapping needs an explicit operator token. */
 const BOOTSTRAP_TOKEN = 'test-bootstrap-token';
 
-const customerTotpSecrets = new Map<string, string>();
-
 async function loginClient(identifier: string, password: string): Promise<TestClient> {
   const client = new TestClient(baseUrl);
   await client.bootstrap();
@@ -38,17 +36,19 @@ async function loginClient(identifier: string, password: string): Promise<TestCl
 }
 
 async function loginCustomerClient(identifier: string, password: string): Promise<TestClient> {
-  const client = await loginClient(identifier, password);
+  const client = new TestClient(baseUrl);
+  await client.bootstrap();
+  const login = await client.post('/api/auth/login', { identifier, password });
+  assert.equal(login.status, 200, `login failed for ${identifier}: ${JSON.stringify(login.body)}`);
   const session = await sessionOf(client);
   if (session.mfaRequired) {
-    const secret = customerTotpSecrets.get(identifier);
-    assert.ok(secret, `missing TOTP secret for ${identifier}`);
-    // Tests may log the same customer in twice within one TOTP window; clear replay guard only here.
-    await handle.db.collection(COLLECTIONS.users).updateOne(
-      { publicReference: (await refOf(client)) },
-      { $set: { 'mfa.lastStep': null } },
-    );
-    const challenge = await client.post('/api/auth/mfa/challenge', { code: generateTotp(secret) });
+    let otp = (login.body as { devLoginOtp?: string }).devLoginOtp;
+    if (!otp) {
+      const resend = await client.post('/api/auth/login/otp/resend', {});
+      otp = (resend.body as { devLoginOtp?: string }).devLoginOtp;
+    }
+    assert.ok(otp, `missing devLoginOtp for ${identifier}`);
+    const challenge = await client.post('/api/auth/login/otp', { code: otp });
     assert.equal(challenge.status, 200, JSON.stringify(challenge.body));
   }
   return client;
@@ -100,11 +100,11 @@ before(async () => {
     { confirmToken: BOOTSTRAP_TOKEN },
   );
 
-  // Fixture customers for ownership tests (MFA enrolled so self-service APIs work).
+  // Fixture customers for ownership tests (login OTP satisfied so self-service APIs work).
   const fixture02 = await registerClient('55555502');
-  customerTotpSecrets.set('55555502', await satisfyCustomerMfa(fixture02));
+  await completeCustomerLoginOtp(fixture02);
   const fixture03 = await registerClient('55555503');
-  customerTotpSecrets.set('55555503', await satisfyCustomerMfa(fixture03));
+  await completeCustomerLoginOtp(fixture03);
 
   // Main satisfied admin client: login -> enroll -> confirm (confirm satisfies the session).
   const admin = await loginClient(SUPER_PHONE, SUPER_PW);
@@ -157,7 +157,7 @@ test('C01 register, session reload, logout and login round-trip', async () => {
 
 test('C02 password hashes are not returned and are stored hashed', async () => {
   const client = await registerClient('55550010');
-  await satisfyCustomerMfa(client);
+  await completeCustomerLoginOtp(client);
   const ref = await refOf(client);
   const self = await client.get(`/api/users/${ref}`);
   assert.ok(!JSON.stringify(self.body).includes('passwordHash'));
@@ -485,8 +485,22 @@ test('email verification is single-use and gates MFA enrollment', async () => {
   assert.equal((await client.post('/api/auth/mfa/enroll', {})).status, 200);
 });
 
-test('C14 customer MFA is mandatory on login and gates account until enrolled', async () => {
-  const client = await registerClient('55559901');
+test('C14 customer login email OTP gates account until verified', async () => {
+  mailCaptures.length = 0;
+  const client = new TestClient(baseUrl);
+  await client.bootstrap();
+  const reg = await client.post('/api/auth/register', {
+    fullName: 'OTP Customer',
+    phone: '55559901',
+    email: fixtureEmail('55559901'),
+    password: FIXTURE_PW,
+    termsAccepted: true,
+  });
+  assert.equal(reg.status, 201);
+  const devVerifyToken = (reg.body as { devVerifyToken?: string }).devVerifyToken;
+  assert.ok(devVerifyToken);
+  assert.equal((await client.post('/api/auth/email/verify', { token: devVerifyToken })).status, 200);
+
   const session = await client.get('/api/auth/session');
   assert.equal((session.body as { mfaRequired: boolean; mfaEnabled: boolean }).mfaRequired, true);
   assert.equal((session.body as { mfaEnabled: boolean }).mfaEnabled, false);
@@ -495,31 +509,56 @@ test('C14 customer MFA is mandatory on login and gates account until enrolled', 
   assert.equal(denied.status, 403);
   assert.equal((denied.body as { error: { details: { code: string } } }).error.details.code, 'MFA_REQUIRED');
 
-  const enroll = await client.post('/api/auth/mfa/enroll', {});
-  assert.equal(enroll.status, 200);
-  const secret = (enroll.body as { secret: string }).secret;
-  const confirm = await client.post('/api/auth/mfa/enroll/confirm', { code: generateTotp(secret) });
-  assert.equal(confirm.status, 200);
+  const signInMails = () =>
+    mailCaptures.filter((m) => m.subject === 'Your sign-in code' && m.to === fixtureEmail('55559901'));
+  assert.ok(signInMails().some((m) => /\d{6}/.test(m.text)));
 
+  assert.equal((await client.post('/api/auth/login/otp', { code: '000000' })).status, 422);
+
+  let devLoginOtp = (reg.body as { devLoginOtp?: string }).devLoginOtp;
+  if (!devLoginOtp) {
+    const resend = await client.post('/api/auth/login/otp/resend', {});
+    devLoginOtp = (resend.body as { devLoginOtp?: string }).devLoginOtp;
+  }
+  assert.ok(devLoginOtp);
+  assert.equal((await client.post('/api/auth/login/otp', { code: devLoginOtp })).status, 200);
   assert.equal((await client.get('/api/account')).status, 200);
 
   const phone = '55559901';
-  const again = await loginClient(phone, FIXTURE_PW);
+  const again = new TestClient(baseUrl);
+  await again.bootstrap();
+  const loginAgain = await again.post('/api/auth/login', { identifier: phone, password: FIXTURE_PW });
+  assert.equal(loginAgain.status, 200);
   const againSession = await again.get('/api/auth/session');
   assert.equal((againSession.body as { mfaRequired: boolean; mfaEnabled: boolean }).mfaRequired, true);
-  assert.equal((againSession.body as { mfaEnabled: boolean }).mfaEnabled, true);
-  const challenge = await again.post('/api/auth/mfa/challenge', { code: generateTotp(secret) });
-  assert.equal(challenge.status, 200);
+  assert.equal((againSession.body as { mfaEnabled: boolean }).mfaEnabled, false);
+  const otp = (loginAgain.body as { devLoginOtp?: string }).devLoginOtp;
+  assert.ok(otp);
+  assert.equal((await again.post('/api/auth/login/otp', { code: otp })).status, 200);
+  assert.equal((await again.post('/api/auth/login/otp', { code: otp })).status, 422);
   assert.equal((await again.get('/api/account')).status, 200);
+
+  const enroll = await again.post('/api/auth/mfa/enroll', {});
+  assert.equal(enroll.status, 200);
+  const secret = (enroll.body as { secret: string }).secret;
+  assert.equal((await again.post('/api/auth/mfa/enroll/confirm', { code: generateTotp(secret) })).status, 200);
+
+  const totpLogin = await loginClient(phone, FIXTURE_PW);
+  await handle.db.collection(COLLECTIONS.users).updateOne(
+    { publicReference: await refOf(totpLogin) },
+    { $set: { 'mfa.lastStep': null } },
+  );
+  assert.equal((await totpLogin.post('/api/auth/mfa/challenge', { code: generateTotp(secret) })).status, 200);
+  assert.equal((await totpLogin.get('/api/account')).status, 200);
 });
 
 test('C13 last-super-admin protection holds under concurrent changes', async () => {
   // Promote fixture 55555503 to super admin, then give it a satisfied session.
   const actor = pendingSuperadmin;
-  const otherRef = await refOf(await loginClient('55555503', FIXTURE_PW));
+  const otherRef = await refOf(await loginCustomerClient('55555503', FIXTURE_PW));
   assert.equal((await actor.patch(`/api/admin/users/${otherRef}/roles`, { roles: ['super_admin'] })).status, 200);
 
-  const other = await loginClient('55555503', FIXTURE_PW);
+  const other = await loginCustomerClient('55555503', FIXTURE_PW);
   assert.equal((await other.get('/api/admin/me')).status, 200);
 
   const countActive = () =>

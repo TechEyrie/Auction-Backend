@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import type { Db, ObjectId } from 'mongodb';
 import type { AppConfig } from '../../config/index.ts';
 import { AppError, conflict } from '../../shared/errors.ts';
@@ -18,6 +19,7 @@ export type AuthDeps = { db: Db; config: AppConfig; logger: Logger };
 
 const CHALLENGE_TTL_MS = 30 * 60_000;
 const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60_000;
+const LOGIN_OTP_TTL_MS = 10 * 60_000;
 const CHALLENGE_MAX_ATTEMPTS = 5;
 const RECOVERY_CODE_COUNT = 10;
 
@@ -31,10 +33,13 @@ function currentStep(atMs = Date.now()): number {
   return Math.floor(atMs / 1000 / TOTP_STEP_SECONDS);
 }
 
-/** Customers must satisfy TOTP MFA; staff enforcement is deferred. */
 export function requiresMfa(user: UserDoc): boolean {
-  if (isStaff(user.roles)) return false; // TEMP: staff MFA later
-  return true;
+  if (isStaff(user.roles)) return false; // TEMP: staff/admin login OTP + authenticator later; do not enforce here
+  return true; // customers: login email OTP (or optional TOTP if already enabled)
+}
+
+function loginOtpCode(): string {
+  return String(randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
 function assertPasswordPolicy(
@@ -131,6 +136,41 @@ export function createAuthService(deps: AuthDeps) {
     });
   }
 
+  /** Issues a fresh login OTP, emails it, and returns the raw code only outside production. */
+  async function issueLoginOtp(user: UserWithId, ip: string | null): Promise<string | null> {
+    const email = user.emailNormalized;
+    if (!email) {
+      throw new AppError('VALIDATION_ERROR', 'Cannot send a sign-in code without an email address', {
+        fieldErrors: { identifier: 'cannot send login code', email: 'cannot send login code' },
+      });
+    }
+    await repo.invalidateUserChallenges(db, user._id, 'login_otp');
+    const code = loginOtpCode();
+    await repo.insertChallenge(db, {
+      purpose: 'login_otp',
+      userId: user._id,
+      identifier: email,
+      tokenHash: sha256Hex(code),
+      expiresAt: new Date(Date.now() + LOGIN_OTP_TTL_MS),
+      attempts: 0,
+      maxAttempts: CHALLENGE_MAX_ATTEMPTS,
+      consumedAt: null,
+      createdAt: new Date(),
+      requestIp: ip,
+    });
+    const text = `Your sign-in code for Araq & Kahraman is:\n\n${code}\n\nThis code expires in 10 minutes. If you did not try to sign in, you can ignore this email.`;
+    try {
+      await sendTransactionalMail({ config, to: email, subject: 'Your sign-in code', text });
+    } catch (err) {
+      deps.logger.error('login OTP email send failed', {
+        userId: user._id.toHexString(),
+        err: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+    return config.isProduction ? null : code;
+  }
+
   async function register(input: RegisterInput, ctx: { ip: string | null; userAgent: string | null }) {
     const phoneE164 = input.phone?.trim() ? normalizePhoneE164(input.phone) : null;
     const emailNormalized = normalizeEmail(input.email ?? null);
@@ -205,7 +245,27 @@ export function createAuthService(deps: AuthDeps) {
         err: err instanceof Error ? err.message : String(err),
       });
     }
-    return { user: toUserDto(user), session, verifyToken };
+    let devLoginOtp: string | null = null;
+    let loginOtpSent = false;
+    if (requiresMfa(user)) {
+      try {
+        devLoginOtp = await issueLoginOtp(user, ctx.ip);
+        loginOtpSent = true;
+      } catch (err) {
+        deps.logger.error('login OTP send failed after register', {
+          userId: insertedId.toHexString(),
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return {
+      user: toUserDto(user),
+      session,
+      verifyToken,
+      mfaRequired: requiresMfa(user),
+      loginOtpSent,
+      devLoginOtp,
+    };
   }
 
   async function login(
@@ -232,7 +292,22 @@ export function createAuthService(deps: AuthDeps) {
       ...ctx,
     });
     await repo.markLastLogin(db, user._id);
-    return { user: toUserDto(user), session, mfaRequired: requiresMfa(user) };
+    const mfaRequired = requiresMfa(user);
+    let devLoginOtp: string | null = null;
+    let loginOtpSent = false;
+    if (mfaRequired) {
+      try {
+        devLoginOtp = await issueLoginOtp(user, ctx.ip);
+        loginOtpSent = true;
+      } catch (err) {
+        deps.logger.error('login OTP send failed after login', {
+          userId: user._id.toHexString(),
+          err: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+    }
+    return { user: toUserDto(user), session, mfaRequired, loginOtpSent, devLoginOtp };
   }
 
   async function logout(ctx: AuthContext | null): Promise<void> {
@@ -422,6 +497,48 @@ export function createAuthService(deps: AuthDeps) {
     return { recoveryCodes };
   }
 
+  async function completeLoginOtp(user: UserWithId, session: AuthContext['session'], code: string) {
+    if (session.mfaSatisfied) throw new AppError('CONFLICT', 'MFA is already satisfied for this session');
+    const normalized = String(code ?? '').trim();
+    if (!/^\d{6}$/.test(normalized)) {
+      throw new AppError('VALIDATION_ERROR', 'That code is not valid', { fieldErrors: { code: 'invalid' } });
+    }
+    const replay = await repo.findChallengeByTokenHash(db, sha256Hex(normalized));
+    if (replay?.purpose === 'login_otp' && replay.consumedAt) {
+      throw new AppError('VALIDATION_ERROR', 'This sign-in code has already been used');
+    }
+    const challenge = await repo.findLatestOpenUserChallenge(db, user._id, 'login_otp');
+    if (!challenge) {
+      throw new AppError('VALIDATION_ERROR', 'That code is not valid', { fieldErrors: { code: 'invalid' } });
+    }
+    if (challenge.expiresAt.getTime() < Date.now()) {
+      throw new AppError('VALIDATION_ERROR', 'This sign-in code has expired', { fieldErrors: { code: 'expired' } });
+    }
+    if (challenge.attempts >= challenge.maxAttempts) {
+      throw new AppError('RATE_LIMITED', 'Too many attempts on this sign-in code');
+    }
+    if (!safeEqualHex(challenge.tokenHash, sha256Hex(normalized))) {
+      await repo.incrementChallengeAttempts(db, challenge._id);
+      throw new AppError('VALIDATION_ERROR', 'That code is not valid', { fieldErrors: { code: 'invalid' } });
+    }
+    const consumed = await repo.consumeChallenge(db, challenge._id);
+    if (!consumed) {
+      throw new AppError('VALIDATION_ERROR', 'This sign-in code has already been used');
+    }
+    await repo.setSessionMfaSatisfied(db, session._id, currentStep());
+    const token = randomToken(32);
+    const csrfToken = randomToken(24);
+    await repo.rotateSession(db, session._id, sha256Hex(token), sha256Hex(csrfToken));
+    return { token, csrfToken };
+  }
+
+  async function resendLoginOtp(user: UserWithId, ip: string | null): Promise<string | null> {
+    if (!requiresMfa(user)) {
+      throw new AppError('CONFLICT', 'Sign-in verification is not required for this account');
+    }
+    return issueLoginOtp(user, ip);
+  }
+
   async function mfaChallenge(user: UserWithId, session: AuthContext['session'], code: string, keyBase64: string) {
     if (session.mfaSatisfied) throw new AppError('CONFLICT', 'MFA is already satisfied for this session');
     if (!user.mfa.enabled || !user.mfa.secretEnc) {
@@ -487,6 +604,8 @@ export function createAuthService(deps: AuthDeps) {
     resetPassword,
     startMfaEnrollment,
     confirmMfaEnrollment,
+    completeLoginOtp,
+    resendLoginOtp,
     mfaChallenge,
     mfaRecover,
     sessionView,

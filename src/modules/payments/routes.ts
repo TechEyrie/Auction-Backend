@@ -50,7 +50,7 @@ export function paymentRouter(deps: { db: Db; config: AppConfig }): Router {
       res.status(paid.paymentState === 'paid' ? 200 : 201).json({
         order: orderView(paid),
         ignoredClientAmount: body.amountMinor ?? null,
-        message: 'Recorded against the server total. No card was charged. This is not a gateway payment.',
+        message: 'Order confirmed for cash on delivery. Pay when the item is handed over — nothing was collected online.',
       });
     } catch (err) { next(err); }
   });

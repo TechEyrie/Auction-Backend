@@ -84,6 +84,7 @@ const buySchema = z.object({
 
 const versionSchema = z.object({ expectedVersion: z.coerce.number().int().min(1) });
 const archiveSchema = z.object({ reason: z.string().min(3).max(300) });
+const duplicateSchema = z.object({ reason: z.string().min(3).max(300).optional() }).strict();
 const adminListSchema = z.object({
   status: z.enum(['draft', 'published', 'archived']).optional(),
   search: z.string().max(120).optional(),
@@ -318,6 +319,22 @@ export function adminListingRouter(deps: ListingRouterDeps): Router {
         requestId: req.requestId ?? 'n/a',
       });
       res.setHeader('Cache-Control', 'no-store');
+      res.json({ listing: toAdminListingDto(listing, await service.adminDtoContext(listing)) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/:ref/duplicate', requireCapability('inventory.manage'), async (req, res, next) => {
+    try {
+      const ref = parseInput(listingReferenceSchema, String(req.params.ref), 'Invalid listing reference');
+      const body = parseInput(duplicateSchema, req.body ?? {});
+      const listing = await service.duplicate(ref, {
+        reference: req.auth!.user.publicReference,
+        requestId: req.requestId ?? 'n/a',
+        reason: body.reason ?? null,
+      });
+      res.status(201).setHeader('Cache-Control', 'no-store');
       res.json({ listing: toAdminListingDto(listing, await service.adminDtoContext(listing)) });
     } catch (err) {
       next(err);

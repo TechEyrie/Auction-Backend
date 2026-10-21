@@ -22,6 +22,7 @@ import { TestClient } from '../helpers/client.ts';
 import { createAdminFixture, createCustomerFixture } from '../helpers/authFixture.ts';
 import { jpeg, png, webp } from '../helpers/images.ts';
 import { createLocalStorage, type MediaStorage } from '../../src/modules/media/storage.ts';
+import { listPublicListings } from '../../src/modules/listings/repository.ts';
 
 let replSet: MongoMemoryReplSet;
 let handle: DbHandle;
@@ -210,6 +211,8 @@ type ListingDto = {
   publishedAt: string | null;
   publicUrl: string;
   featured: boolean;
+  availability: string;
+  slug: string;
   seller: { sellerReference: string; displayName: string; verificationBadge: boolean };
 };
 
@@ -1519,4 +1522,119 @@ test('endsOn filters auction listings ending on a Qatar civil day', async () => 
 
   const badMethod = await fetch(`${baseUrl}/api/listings?method=enquiry&endsOn=2026-10-15`);
   assert.equal(badMethod.status, 422);
+});
+
+test('admin duplicate creates an unsold draft clone without mutating the source', async () => {
+  const priceMinor = 28_500;
+  const titleMarker = `DupUnsold${Date.now()}`;
+  const published = await createPublishedListing({
+    categoryKey: 'clothes-thobes',
+    titleEn: `${titleMarker} sold source`,
+    listingMethod: 'fixed_price',
+    priceMinor,
+    attributes: { item_condition: 'used', brand_name: 'Duplicate source' },
+    image: png(44, 32),
+  });
+
+  const fulfillment = {
+    fullName: 'Duplicate Buyer',
+    phone: '55556222',
+    city: 'Doha',
+    address: 'West Bay Street 3',
+  };
+  const buy = await customer.post(`/api/listings/${published.reference}/buy`, fulfillment);
+  assert.equal(buy.status, 201);
+
+  const sourceBefore = await handle.db.collection(COLLECTIONS.listings).findOne({ listingReference: published.reference });
+  const ordersBefore = await handle.db.collection(COLLECTIONS.orders).countDocuments({ listingReference: published.reference });
+  const auctionsBefore = await handle.db.collection(COLLECTIONS.auctions).countDocuments({ listingReference: published.reference });
+
+  const duplicated = await admin.post(`/api/admin/listings/${published.reference}/duplicate`, {
+    reason: 'restock unsold copy',
+  });
+  assert.equal(duplicated.status, 201, JSON.stringify(duplicated.body));
+  const clone = (duplicated.body as { listing: ListingDto }).listing;
+  assert.notEqual(clone.listingReference, published.reference);
+  assert.match(clone.listingReference, /^l_[A-Za-z0-9_-]{6,32}$/);
+  assert.equal(clone.status, 'draft');
+  assert.equal(clone.availability, 'available');
+  assert.equal(clone.featured, false);
+  assert.ok(sourceBefore?.slug);
+  assert.notEqual(clone.slug, sourceBefore!.slug);
+  assert.equal(clone.adminNotes, `Duplicated from ${published.reference}. `);
+  assert.equal(clone.media.length, 1);
+  assert.notEqual(clone.media[0]?.assetId, published.assetId);
+
+  const sourceAfter = await handle.db.collection(COLLECTIONS.listings).findOne({ listingReference: published.reference });
+  assert.equal(sourceAfter?.availability, 'sold');
+  assert.equal(sourceAfter?.status, 'published');
+  assert.equal(
+    await handle.db.collection(COLLECTIONS.orders).countDocuments({ listingReference: published.reference }),
+    ordersBefore,
+  );
+  assert.equal(
+    await handle.db.collection(COLLECTIONS.auctions).countDocuments({ listingReference: published.reference }),
+    auctionsBefore,
+  );
+
+  const browseSoldHidden = await fetch(`${baseUrl}/api/listings?method=fixed_price&limit=48`);
+  const browseRefs = ((await browseSoldHidden.json()) as { listings: Array<{ listingReference: string }> }).listings.map(
+    (row) => row.listingReference,
+  );
+  assert.equal(browseRefs.includes(published.reference), false);
+  assert.equal((await publicListing(published.reference)).status, 200);
+
+  assert.equal((await publicListing(clone.listingReference)).status, 404);
+
+  const duplicateAudit = await handle.db.collection(COLLECTIONS.auditLogs).findOne({
+    action: 'listing.duplicated',
+    targetId: clone.listingReference,
+  });
+  assert.equal(duplicateAudit?.reason, 'restock unsold copy');
+  assert.deepEqual(duplicateAudit?.changeSummary, {
+    sourceListingReference: published.reference,
+    newListingReference: clone.listingReference,
+  });
+
+  const publishedClone = await admin.post(`/api/admin/listings/${clone.listingReference}/publish`, {
+    expectedVersion: clone.version,
+  });
+  assert.equal(publishedClone.status, 200, JSON.stringify(publishedClone.body));
+  const liveClone = (publishedClone.body as { listing: ListingDto }).listing;
+  assert.equal(liveClone.status, 'published');
+
+  assert.equal((await publicListing(clone.listingReference)).status, 200);
+
+  const catalogueSlice = await listPublicListings(handle.db, {
+    method: 'fixed_price',
+    listingReferences: [clone.listingReference, published.reference],
+    page: 1,
+    limit: 10,
+    sort: 'recent',
+  });
+  assert.deepEqual(
+    catalogueSlice.items.map((row) => row.listingReference).sort(),
+    [clone.listingReference].sort(),
+  );
+
+  const sourceMedia = await publicMedia(published.reference, published.assetId);
+  assert.equal(sourceMedia.status, 200);
+  const cloneAssetId = liveClone.media[0]!.assetId;
+  const cloneMedia = await publicMedia(clone.listingReference, cloneAssetId);
+  assert.equal(cloneMedia.status, 200);
+  assert.ok(cloneMedia.bytes.length > 0);
+
+  assert.equal((await customer.post(`/api/admin/listings/${published.reference}/duplicate`, {})).status, 403);
+  assert.equal((await admin.post('/api/admin/listings/l_notfound00/duplicate', {})).status, 404);
+
+  const blocked = await createDraft({ title: { en: 'Blocked duplicate probe' } });
+  const blockedAsset = await upload(`listing_${blocked.listingReference}`, png(24, 24));
+  const blockedAttached = await attachMedia(blocked.listingReference, blocked.version, [blockedAsset.body.asset!.assetId]);
+  const blockedVersion = (blockedAttached.body as { listing: ListingDto }).listing.version;
+  await patchListing(blocked.listingReference, {
+    moderationState: 'blocked',
+    moderationNote: 'compliance hold',
+    expectedVersion: blockedVersion,
+  });
+  assert.equal((await admin.post(`/api/admin/listings/${blocked.listingReference}/duplicate`, {})).status, 422);
 });

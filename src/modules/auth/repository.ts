@@ -140,6 +140,10 @@ export function findChallengeByTokenHash(db: Db, tokenHash: string) {
   return challenges(db).findOne({ tokenHash });
 }
 
+export function findLatestOpenUserChallenge(db: Db, userId: ObjectId, purpose: ChallengePurpose) {
+  return challenges(db).findOne({ userId, purpose, consumedAt: null }, { sort: { createdAt: -1 } });
+}
+
 export async function incrementChallengeAttempts(db: Db, id: ObjectId): Promise<void> {
   await challenges(db).updateOne({ _id: id }, { $inc: { attempts: 1 } });
 }

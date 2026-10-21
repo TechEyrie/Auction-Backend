@@ -1044,6 +1044,101 @@ export function createListingService(deps: ListingDeps) {
     },
 
     /**
+     * Clone a listing into a new draft with `availability: available`. The source record — sold
+     * state, auctions, orders and bids — is never modified. Ready media is re-uploaded into the
+     * clone's own collection so asset ids are not shared across listings.
+     */
+    async duplicate(
+      sourceRef: string,
+      actor: { reference: string; requestId: string; reason: string | null },
+    ): Promise<ListingWithId> {
+      const source = await findListingByReference(db, sourceRef);
+      if (!source) throw notFound('Listing not found');
+      if (source.moderation.state === 'blocked') {
+        throw fieldError('moderationState', 'blocked listings cannot be duplicated');
+      }
+
+      const notesPrefix = `Duplicated from ${source.listingReference}. `;
+      const adminNotes = source.adminNotes ? `${notesPrefix}${source.adminNotes}` : notesPrefix;
+
+      const created = await this.create(
+        {
+          sellerReference: source.sellerReference,
+          categoryKey: source.categoryKey,
+          listingMethod: source.listingMethod,
+          languageMode: source.languageMode,
+          title: source.title,
+          description: source.description,
+          condition: source.condition,
+          audience: source.audience,
+          locationKey: source.location.key,
+          attributes: source.attributes,
+          priceMinor: source.priceMinor,
+          adminNotes,
+          featured: false,
+        },
+        { reference: actor.reference, requestId: actor.requestId },
+      );
+
+      const sortedMedia = [...source.media].sort((left, right) => left.position - right.position);
+      const requested: Array<{ assetId: string; alt?: { en?: string | null; ar?: string | null } }> = [];
+      const idMap = new Map<string, string>();
+      const targetCollection = mediaCollectionKey(created.listingReference);
+
+      for (const entry of sortedMedia) {
+        let asset;
+        try {
+          asset = await media.getByAssetId(entry.assetId);
+        } catch {
+          continue;
+        }
+        if (asset.status !== 'ready') continue;
+        const bytes = await media.readBytes(asset);
+        const uploaded = await media.upload({
+          bytes,
+          declaredMime: asset.mime ?? asset.declaredMime,
+          collectionKey: targetCollection,
+          actor: { reference: actor.reference, requestId: actor.requestId },
+        });
+        idMap.set(entry.assetId, uploaded.assetId);
+        requested.push({ assetId: uploaded.assetId, alt: entry.alt });
+      }
+
+      let result = created;
+      if (requested.length > 0) {
+        const resolved = await resolveMedia(created.listingReference, requested, []);
+        const coverSource = source.coverAssetId ?? sortedMedia.find((entry) => idMap.has(entry.assetId))?.assetId ?? null;
+        const coverAssetId =
+          coverSource && idMap.has(coverSource) ? idMap.get(coverSource)! : resolved.entries[0]?.assetId ?? null;
+        const now = new Date();
+        const updated = await updateListingVersioned(db, created.listingReference, created.version, {
+          media: resolved.entries,
+          coverAssetId,
+          updatedAt: now,
+          updatedBy: actor.reference,
+        });
+        if (!updated) throw conflict('This listing changed while duplicating it');
+        await applyMediaReferences(created.listingReference, actor.reference, resolved.toAttach, []);
+        result = updated;
+      }
+
+      await recordAudit(db, {
+        actorId: actor.reference,
+        action: 'listing.duplicated',
+        targetType: 'listing',
+        targetId: result.listingReference,
+        requestId: actor.requestId,
+        changeSummary: {
+          sourceListingReference: source.listingReference,
+          newListingReference: result.listingReference,
+        },
+        reason: actor.reason,
+      });
+      logger.info('listing duplicated', { source: source.listingReference, clone: result.listingReference });
+      return result;
+    },
+
+    /**
      * PUBLIC MEDIA POLICY — the single place public image access is decided.
      *
      * Bytes are served only when **all** of these hold:
