@@ -7,8 +7,16 @@ import { AppError } from '../../shared/errors.ts';
 import { parseInput } from '../../shared/validate.ts';
 import { toUserDto } from '../auth/dto.ts';
 import { requireActiveUser, requireAuth, requireCapability, requireMfa } from '../auth/middleware.ts';
+import { chromePublishSchema, mergeChromeBody } from './content-chrome.ts';
 
 const TERMS_KEY = 'terms';
+
+const termsPublishSchema = z.object({
+  key: z.literal(TERMS_KEY),
+  text: z.string().min(8).max(8000),
+}).strict();
+
+const adminContentPublishSchema = z.union([termsPublishSchema, chromePublishSchema]);
 
 function noStore(_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) {
   res.setHeader('Cache-Control', 'private, no-store');
@@ -146,13 +154,16 @@ export function adminContentRouter(deps: { db: Db }): Router {
   });
   router.post('/content', requireAuth(), requireCapability('content.manage'), async (req, res, next) => {
     try {
-      const body = parseInput(z.object({ key: z.string().regex(/^[a-z]{2,24}$/), text: z.string().min(8).max(8000) }).strict(), req.body);
+      const body = parseInput(adminContentPublishSchema, req.body);
       const current = await deps.db.collection(COLLECTIONS.contentDocuments).findOne({ key: body.key });
       const version = (typeof current?.version === 'number' ? current.version : 0) + 1;
       const publishedAt = new Date();
+      const storedBody = body.key === TERMS_KEY
+        ? body.text
+        : mergeChromeBody(current?.body, { en: body.en, ar: body.ar });
       await deps.db.collection(COLLECTIONS.contentDocuments).updateOne(
         { key: body.key },
-        { $set: { key: body.key, status: 'published', version, body: body.text, publishedAt, publishedBy: req.auth!.user.publicReference } },
+        { $set: { key: body.key, status: 'published', version, body: storedBody, publishedAt, publishedBy: req.auth!.user.publicReference } },
         { upsert: true },
       );
       res.status(201).json({ key: body.key, version });

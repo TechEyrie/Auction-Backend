@@ -554,6 +554,18 @@ test('J01-J12 account, enquiry, and published terms', async () => {
 
   const published = await admin.post<{ version: number }>('/api/admin/content', { key: 'terms', text: 'Draft terms for acceptance. Not counsel-approved.' });
   assert.equal(published.status, 201);
+  const headerPub = await admin.post<{ version: number }>('/api/admin/content', {
+    key: 'header',
+    en: { 'header.search': 'Find lots' },
+    ar: { 'header.search': 'بحث مخصص' },
+  });
+  assert.equal(headerPub.status, 201);
+  const headerShown = await customer.get<{ version: number; body: { en: Record<string, string>; ar: Record<string, string> } }>('/api/content/header');
+  assert.equal(headerShown.status, 200);
+  assert.equal(headerShown.body.body.en['header.search'], 'Find lots');
+  assert.equal(headerShown.body.body.ar['header.search'], 'بحث مخصص');
+  const badChrome = await admin.post('/api/admin/content', { key: 'header', en: { 'not.a.field': 'x' }, ar: {} });
+  assert.equal(badChrome.status, 422);
   const updated = await admin.post<{ version: number }>('/api/admin/content', { key: 'terms', text: 'Updated draft terms. Not counsel-approved.' });
   const shown = await customer.get<{ version: number; body: string }>('/api/content/terms');
   assert.equal(shown.body.version, updated.body.version);
