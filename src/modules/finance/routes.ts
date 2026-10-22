@@ -95,6 +95,15 @@ export function financeRouter(deps: { db: Db }): Router {
           return [String(listing.listingReference), title?.en?.trim() || title?.ar?.trim() || 'Product'] as const;
         }),
       );
+      const bilingualTitleByRef = new Map(
+        listings.map((listing) => {
+          const title = listing.title as { en?: string; ar?: string } | undefined;
+          return [
+            String(listing.listingReference),
+            { en: title?.en?.trim() || null, ar: title?.ar?.trim() || null },
+          ] as const;
+        }),
+      );
       res.json({
         page,
         limit,
@@ -105,6 +114,7 @@ export function financeRouter(deps: { db: Db }): Router {
           sourceLabel: sourceLabel(order.source),
           listingReference: order.listingReference,
           listingTitle: titleByRef.get(String(order.listingReference)) ?? 'Product',
+          title: bilingualTitleByRef.get(String(order.listingReference)) ?? { en: null, ar: null },
           paymentState: order.paymentState,
           paymentLabel: paymentLabel(order.paymentState),
           amountPaidMinor: order.winningPriceMinor,
