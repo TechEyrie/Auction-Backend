@@ -17,6 +17,7 @@ export const CATEGORY_ICON_KEYS = [
   'home',
   'car',
   'phone',
+  'electronics',
   'gem',
   'folder',
 ] as const;
@@ -42,6 +43,7 @@ export const CATEGORY_ICONS: Array<{ key: CategoryIconKey; label: string }> = [
   { key: 'home', label: 'Home' },
   { key: 'car', label: 'Car' },
   { key: 'phone', label: 'Phone' },
+  { key: 'electronics', label: 'Electronics' },
   { key: 'gem', label: 'Gem' },
   { key: 'folder', label: 'Folder' },
 ];

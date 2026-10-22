@@ -225,8 +225,6 @@ export function createAuthService(deps: AuthDeps) {
       throw err;
     }
     const user: UserWithId = { ...doc, _id: insertedId };
-    const session = await issueSession(deps, user, { keepSignedIn: false, ...ctx });
-    await repo.markLastLogin(db, insertedId);
     await recordAudit(db, {
       actorId: insertedId.toHexString(),
       action: 'user.register',
@@ -245,27 +243,7 @@ export function createAuthService(deps: AuthDeps) {
         err: err instanceof Error ? err.message : String(err),
       });
     }
-    let devLoginOtp: string | null = null;
-    let loginOtpSent = false;
-    if (requiresMfa(user)) {
-      try {
-        devLoginOtp = await issueLoginOtp(user, ctx.ip);
-        loginOtpSent = true;
-      } catch (err) {
-        deps.logger.error('login OTP send failed after register', {
-          userId: insertedId.toHexString(),
-          err: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-    return {
-      user: toUserDto(user),
-      session,
-      verifyToken,
-      mfaRequired: requiresMfa(user),
-      loginOtpSent,
-      devLoginOtp,
-    };
+    return { user: toUserDto(user), verifyToken };
   }
 
   async function login(
@@ -286,6 +264,11 @@ export function createAuthService(deps: AuthDeps) {
     }
     if (user.status !== 'active') {
       throw new AppError('FORBIDDEN', 'This account cannot sign in');
+    }
+    if (!user.emailVerifiedAt && !isStaff(user.roles)) {
+      throw new AppError('FORBIDDEN', 'Verify your email before signing in', {
+        details: { code: 'EMAIL_NOT_VERIFIED' },
+      });
     }
     const session = await issueSession(deps, user, {
       keepSignedIn: input.keepSignedIn === true,
@@ -403,6 +386,24 @@ export function createAuthService(deps: AuthDeps) {
       await sendEmailVerifyMail(emailNormalized, token);
     } catch (err) {
       deps.logger.error('email verify resend failed', {
+        userId: user._id.toHexString(),
+        err: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+    return config.isProduction ? null : token;
+  }
+
+  async function resendEmailVerificationByEmail(email: string, ip: string | null): Promise<string | null> {
+    const emailNormalized = normalizeEmail(email);
+    if (!emailNormalized) return null;
+    const user = await repo.findUserByEmail(db, emailNormalized);
+    if (!user || user.emailVerifiedAt) return null;
+    const token = await issueEmailVerifyChallenge(user._id, emailNormalized, ip);
+    try {
+      await sendEmailVerifyMail(emailNormalized, token);
+    } catch (err) {
+      deps.logger.error('email verify resend by email failed', {
         userId: user._id.toHexString(),
         err: err instanceof Error ? err.message : String(err),
       });
@@ -580,13 +581,21 @@ export function createAuthService(deps: AuthDeps) {
   function sessionView(
     user: UserWithId,
     session: AuthContext['session'],
-  ): { user: UserDto; mfaRequired: boolean; mfaEnabled: boolean; capabilities: string[] } {
-    const mfaRequired = requiresMfa(user);
+  ): { user: UserDto | null; mfaRequired: boolean; mfaEnabled: boolean; capabilities: string[] } {
+    const needsMfa = requiresMfa(user);
+    if (needsMfa && !session.mfaSatisfied) {
+      return {
+        user: null,
+        mfaRequired: true,
+        mfaEnabled: user.mfa.enabled,
+        capabilities: [],
+      };
+    }
     return {
       user: toUserDto(user),
-      mfaRequired: mfaRequired && !session.mfaSatisfied,
+      mfaRequired: false,
       mfaEnabled: user.mfa.enabled,
-      capabilities: !mfaRequired || session.mfaSatisfied ? capabilitiesOf(user) : [],
+      capabilities: capabilitiesOf(user),
     };
   }
 
@@ -600,6 +609,7 @@ export function createAuthService(deps: AuthDeps) {
     logout,
     verifyEmail,
     resendEmailVerification,
+    resendEmailVerificationByEmail,
     forgotPassword,
     resetPassword,
     startMfaEnrollment,

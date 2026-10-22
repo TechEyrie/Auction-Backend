@@ -75,15 +75,10 @@ export function authRouter(deps: AuthRouterDeps): Router {
     try {
       const body = parseInput(registerSchema, req.body);
       const result = await service.register(body, { ip: clientIp(req), userAgent: req.header('user-agent') ?? null });
-      setSessionCookie(res, config, result.session.token, result.session.cookieMaxAgeMs);
-      setCsrfCookie(res, config, result.session.csrfToken);
       res.status(201).json({
         user: result.user,
-        mfaRequired: result.mfaRequired,
         returnTo: safeInternalPath(body.returnTo),
-        ...(result.loginOtpSent ? { loginOtpSent: true as const } : {}),
         ...(result.verifyToken && !config.isProduction ? { devVerifyToken: result.verifyToken } : {}),
-        ...(result.devLoginOtp && !config.isProduction ? { devLoginOtp: result.devLoginOtp } : {}),
       });
     } catch (err) {
       next(err);
@@ -156,9 +151,27 @@ export function authRouter(deps: AuthRouterDeps): Router {
     }
   });
 
-  router.post('/email/resend', requireAuth(), requireActiveUser(), limit('forgot'), async (req, res, next) => {
+  const resendEmailSchema = z.object({
+    email: z.string().trim().min(1).email().max(120).optional(),
+  });
+
+  router.post('/email/resend', limit('forgot'), async (req, res, next) => {
     try {
-      const token = await service.resendEmailVerification(req.auth!.user, clientIp(req));
+      let token: string | null = null;
+      if (req.auth) {
+        if (req.auth.user.status !== 'active') {
+          throw new AppError('FORBIDDEN', 'This account is not active');
+        }
+        token = await service.resendEmailVerification(req.auth.user, clientIp(req));
+      } else {
+        const body = parseInput(resendEmailSchema, req.body);
+        if (!body.email) {
+          throw new AppError('VALIDATION_ERROR', 'Enter an email address', {
+            fieldErrors: { email: 'required' },
+          });
+        }
+        token = await service.resendEmailVerificationByEmail(body.email, clientIp(req));
+      }
       res.json({
         ok: true,
         ...(token && !config.isProduction ? { devVerifyToken: token } : {}),

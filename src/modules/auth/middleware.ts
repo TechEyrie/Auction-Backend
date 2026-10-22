@@ -5,7 +5,7 @@ import { AppError } from '../../shared/errors.ts';
 import { safeEqualHex, sha256Hex } from '../../shared/crypto.ts';
 import { CSRF_COOKIE, SESSION_COOKIE, readCookie } from './cookies.ts';
 import * as repo from './repository.ts';
-import type { AuthContext } from './models.ts';
+import type { AuthContext, UserDoc } from './models.ts';
 import { capabilitiesFor, isStaff, type Capability } from './roles.ts';
 import { requiresMfa } from './service.ts';
 
@@ -128,13 +128,20 @@ export function requireEmailVerified(): RequestHandler {
   };
 }
 
+function mfaRequiredMessage(user: UserDoc): string {
+  if (!user.mfa.enabled) {
+    return 'Enter the 6-digit code we emailed you to finish signing in';
+  }
+  return 'Enter your authenticator code to finish signing in';
+}
+
 /** A pre-MFA session must not authorize privileged APIs. */
 export function requireMfa(): RequestHandler {
   return (req, _res, next) => {
     if (!req.auth) return next(new AppError('UNAUTHORIZED', 'Authentication required'));
     // Customer-only until staff MFA is re-enabled.
     if (requiresMfa(req.auth.user) && !req.auth.session.mfaSatisfied) {
-      return next(new AppError('FORBIDDEN', 'MFA verification required', { details: { code: 'MFA_REQUIRED' } }));
+      return next(new AppError('FORBIDDEN', mfaRequiredMessage(req.auth.user), { details: { code: 'MFA_REQUIRED' } }));
     }
     next();
   };
@@ -146,7 +153,7 @@ export function requireCapability(capability: Capability): RequestHandler {
     if (!req.auth) return next(new AppError('UNAUTHORIZED', 'Authentication required'));
     if (req.auth.user.status !== 'active') return next(new AppError('FORBIDDEN', 'This account is not active'));
     if (requiresMfa(req.auth.user) && !req.auth.session.mfaSatisfied) {
-      return next(new AppError('FORBIDDEN', 'MFA verification required', { details: { code: 'MFA_REQUIRED' } }));
+      return next(new AppError('FORBIDDEN', mfaRequiredMessage(req.auth.user), { details: { code: 'MFA_REQUIRED' } }));
     }
     if (!capabilitiesFor(req.auth.user.roles).has(capability)) {
       return next(new AppError('FORBIDDEN', 'You do not have permission to do that'));

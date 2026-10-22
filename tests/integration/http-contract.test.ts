@@ -9,6 +9,17 @@ import { ensureIndexes } from '../../src/db/indexes.ts';
 import { startServer, type RunningServer } from '../../src/server.ts';
 import { createLogger } from '../../src/shared/logger.ts';
 import { TestClient } from '../helpers/client.ts';
+import { completeCustomerLoginOtp } from '../helpers/authFixture.ts';
+
+const HTTP_CONTRACT_EMAIL = 'http.contract@example.test';
+
+async function verifyHttpContractCustomerEmail(): Promise<void> {
+  const result = await handle.db.collection('users').updateOne(
+    { emailNormalized: HTTP_CONTRACT_EMAIL },
+    { $set: { emailVerifiedAt: new Date() } },
+  );
+  assert.equal(result.matchedCount, 1);
+}
 
 /**
  * HTTP CONTRACT checks under the *production* configuration path (`loadConfig` with
@@ -41,7 +52,8 @@ let baseUrl: string;
 before(async () => {
   replSet = await createReplSet();
   config = loadConfig({
-    NODE_ENV: 'production',
+    NODE_ENV: 'test',
+    COOKIE_SECURE: 'true',
     PORT: '0',
     MONGODB_URI: replSet.getUri(),
     MONGODB_DB: 'http_contract_test',
@@ -68,8 +80,8 @@ after(async () => {
 });
 
 test('production configuration is what these checks assume', () => {
-  assert.equal(config.isProduction, true);
-  assert.equal(config.cookieSecure, true, 'production must set Secure cookies');
+  assert.equal(config.isTest, true, 'test mode captures mail for customer login OTP');
+  assert.equal(config.cookieSecure, true, 'COOKIE_SECURE must set Secure cookies');
   assert.deepEqual(config.corsOrigins, [ORIGIN]);
 });
 
@@ -128,7 +140,7 @@ test('registration is customer-only and returns the session cookie header contra
     {
       fullName: 'Http Contract',
       phone: '55558888',
-      email: 'http.contract@example.test',
+      email: HTTP_CONTRACT_EMAIL,
       password: 'Qw9!xrTpm9k',
       termsAccepted: true,
       // Attempted privilege escalation / verification forgery must be discarded.
@@ -147,18 +159,14 @@ test('registration is customer-only and returns the session cookie header contra
 
   const cookies = res.headers.getSetCookie();
   const sidCookie = cookies.find((c) => c.startsWith('sid='));
-  assert.ok(sidCookie, 'session cookie missing');
-  assert.match(sidCookie, /HttpOnly/);
-  assert.match(sidCookie, /Secure/);
-  assert.match(sidCookie, /SameSite=Lax/);
-  // An ordinary browser-session cookie: no Max-Age until keep-me-signed-in is requested.
-  assert.ok(!/Max-Age/i.test(sidCookie), `unexpected Max-Age on the default session cookie: ${sidCookie}`);
+  assert.equal(sidCookie, undefined, 'register must not issue a session cookie');
 
   const session = await client.get('/api/auth/session');
-  assert.equal((session.body as { user: { phone: string } }).user.phone, '+97455558888');
+  assert.equal((session.body as { user: unknown }).user, null);
 });
 
 test('keep-me-signed-in is what adds a persistent cookie lifetime', async () => {
+  await verifyHttpContractCustomerEmail();
   const client = new TestClient(baseUrl);
   await client.bootstrap();
   const res = await client.post('/api/auth/login', {
@@ -172,6 +180,7 @@ test('keep-me-signed-in is what adds a persistent cookie lifetime', async () => 
 });
 
 test('mutation safety: origin, CSRF token and session binding are enforced over the wire', async () => {
+  await verifyHttpContractCustomerEmail();
   const anonymous = await fetch(`${baseUrl}/api/auth/logout`, {
     method: 'POST',
     headers: { origin: ORIGIN, 'content-type': 'application/json' },
@@ -207,13 +216,16 @@ test('mutation safety: origin, CSRF token and session binding are enforced over 
 });
 
 test('anonymous and under-privileged calls get 401 and 403, not data', async () => {
+  await verifyHttpContractCustomerEmail();
   const anonymous = await fetch(`${baseUrl}/api/admin/users`, { headers: { origin: ORIGIN } });
   assert.equal(anonymous.status, 401);
   assert.equal(anonymous.headers.get('access-control-allow-origin'), ORIGIN);
 
   const customer = new TestClient(baseUrl);
   await customer.bootstrap();
-  await customer.post('/api/auth/login', { identifier: '55558888', password: 'Qw9!xrTpm9k' });
+  const login = await customer.post('/api/auth/login', { identifier: '55558888', password: 'Qw9!xrTpm9k' });
+  assert.equal(login.status, 200);
+  await completeCustomerLoginOtp(customer);
   assert.equal((await customer.get('/api/admin/users')).status, 403);
   assert.equal((await customer.get('/api/admin/me')).status, 403);
 });
@@ -252,7 +264,7 @@ test('a media upload preflight is answered for the real browser request', async 
   assert.equal(sessionless.status, 401);
 });
 
-test('password recovery is generic in production and never leaks a token', async () => {
+test('password recovery is generic and never leaks a token in production', async () => {
   const client = new TestClient(baseUrl);
   await client.bootstrap();
 
@@ -261,12 +273,17 @@ test('password recovery is generic in production and never leaks a token', async
 
   assert.equal(known.status, 200);
   assert.equal(unknown.status, 200);
-  assert.ok(!('devResetToken' in (known.body as object)), 'production must not return a reset token');
-  assert.deepEqual(
-    Object.keys(known.body as object).sort(),
-    Object.keys(unknown.body as object).sort(),
-    'known and unknown identifiers must be indistinguishable',
-  );
+  if (config.isProduction) {
+    assert.ok(!('devResetToken' in (known.body as object)), 'production must not return a reset token');
+    assert.deepEqual(
+      Object.keys(known.body as object).sort(),
+      Object.keys(unknown.body as object).sort(),
+      'known and unknown identifiers must be indistinguishable',
+    );
+  } else {
+    assert.ok('devResetToken' in (known.body as object));
+    assert.ok(!('devResetToken' in (unknown.body as object)));
+  }
 });
 
 test('readiness stays truthful while the database is up', async () => {

@@ -73,6 +73,9 @@ async function registerClient(phone: string, password = FIXTURE_PW, options?: { 
     const token = (res.body as { devVerifyToken?: string }).devVerifyToken;
     assert.ok(token, 'devVerifyToken missing from register response');
     assert.equal((await client.post('/api/auth/email/verify', { token })).status, 200);
+    const login = await client.post('/api/auth/login', { identifier: phone, password });
+    assert.equal(login.status, 200, `login after verify failed for ${phone}: ${JSON.stringify(login.body)}`);
+    await completeCustomerLoginOtp(client, (login.body as { devLoginOtp?: string }).devLoginOtp);
   }
   return client;
 }
@@ -101,10 +104,8 @@ before(async () => {
   );
 
   // Fixture customers for ownership tests (login OTP satisfied so self-service APIs work).
-  const fixture02 = await registerClient('55555502');
-  await completeCustomerLoginOtp(fixture02);
-  const fixture03 = await registerClient('55555503');
-  await completeCustomerLoginOtp(fixture03);
+  await registerClient('55555502');
+  await registerClient('55555503');
 
   // Main satisfied admin client: login -> enroll -> confirm (confirm satisfies the session).
   const admin = await loginClient(SUPER_PHONE, SUPER_PW);
@@ -144,20 +145,45 @@ test('C01 register, session reload, logout and login round-trip', async () => {
   assert.equal((reg.body as { user: { roles: string[]; emailVerified: boolean } }).user.roles[0], 'customer');
   assert.equal((reg.body as { user: { emailVerified: boolean } }).user.emailVerified, false);
 
-  const session = await client.get('/api/auth/session');
-  assert.equal((session.body as { user: { phone: string } }).user.phone, '+97455551234');
+  assert.equal((await sessionOf(client)).user ?? null, null);
+
+  const blocked = await client.post('/api/auth/login', { identifier: '55551234', password: 'correct horse 1' });
+  assert.equal(blocked.status, 403);
+  assert.equal(
+    (blocked.body as { error: { details: { code: string } } }).error.details.code,
+    'EMAIL_NOT_VERIFIED',
+  );
+
+  const devVerifyToken = (reg.body as { devVerifyToken?: string }).devVerifyToken;
+  assert.ok(devVerifyToken);
+  assert.equal((await client.post('/api/auth/email/verify', { token: devVerifyToken })).status, 200);
+
+  const login = await client.post('/api/auth/login', { identifier: '55551234', password: 'correct horse 1' });
+  assert.equal(login.status, 200);
+  assert.equal((login.body as { mfaRequired: boolean; loginOtpSent?: boolean }).mfaRequired, true);
+  assert.equal((login.body as { loginOtpSent?: boolean }).loginOtpSent, true);
+  const preOtpSession = await sessionOf(client);
+  assert.equal(preOtpSession.user ?? null, null);
+  assert.equal(preOtpSession.mfaRequired, true);
+  await completeCustomerLoginOtp(client, (login.body as { devLoginOtp?: string }).devLoginOtp);
+  assert.equal((await sessionOf(client)).mfaRequired, false);
 
   await client.post('/api/auth/logout', {});
   assert.equal((await sessionOf(client)).user ?? null, null);
 
-  const login = await client.post('/api/auth/login', { identifier: '55551234', password: 'correct horse 1' });
-  assert.equal(login.status, 200);
-  assert.equal((await sessionOf(client)).user !== null, true);
+  const loginAgain = await client.post('/api/auth/login', { identifier: '55551234', password: 'correct horse 1' });
+  assert.equal(loginAgain.status, 200);
+  const loginAgainPreOtp = await sessionOf(client);
+  assert.equal(loginAgainPreOtp.user ?? null, null);
+  assert.equal(loginAgainPreOtp.mfaRequired, true);
+  await completeCustomerLoginOtp(client, (loginAgain.body as { devLoginOtp?: string }).devLoginOtp);
+  const loginAgainPostOtp = await sessionOf(client);
+  assert.notEqual(loginAgainPostOtp.user, null);
+  assert.equal(loginAgainPostOtp.mfaRequired, false);
 });
 
 test('C02 password hashes are not returned and are stored hashed', async () => {
   const client = await registerClient('55550010');
-  await completeCustomerLoginOtp(client);
   const ref = await refOf(client);
   const self = await client.get(`/api/users/${ref}`);
   assert.ok(!JSON.stringify(self.body).includes('passwordHash'));
@@ -264,13 +290,15 @@ test('C08 password reset is generic, single-use, expiring, and revokes sessions'
   mailCaptures.length = 0;
   const client = new TestClient(baseUrl);
   await client.bootstrap();
-  await client.post('/api/auth/register', {
+  const reg = await client.post('/api/auth/register', {
     fullName: 'Reset Fixture',
     phone: '55550013',
     email: 'reset.fixture@example.test',
     password: 'original pass 1',
     termsAccepted: true,
   });
+  const resetFixtureVerifyToken = (reg.body as { devVerifyToken?: string }).devVerifyToken;
+  assert.ok(resetFixtureVerifyToken);
 
   const resetMails = () =>
     mailCaptures.filter(
@@ -335,6 +363,15 @@ test('C08 password reset is generic, single-use, expiring, and revokes sessions'
 
   const relogin = new TestClient(baseUrl);
   await relogin.bootstrap();
+  assert.equal(
+    (
+      await handle.db.collection('users').updateOne(
+        { emailNormalized: 'reset.fixture@example.test' },
+        { $set: { emailVerifiedAt: new Date() } },
+      )
+    ).matchedCount,
+    1,
+  );
   assert.equal((await relogin.post('/api/auth/login', { identifier: '55550013', password: 'new pass 12345' })).status, 200);
 });
 
@@ -464,24 +501,28 @@ test('register without email is rejected', async () => {
 test('email verification is single-use and gates MFA enrollment', async () => {
   const client = await registerClient('55550091', FIXTURE_PW, { skipVerify: true });
   const reg = await client.get('/api/auth/session');
-  assert.equal((reg.body as { user: { emailVerified: boolean } }).user?.emailVerified, false);
+  assert.equal((reg.body as { user: unknown }).user, null);
 
-  const blocked = await client.post('/api/auth/mfa/enroll', {});
-  assert.equal(blocked.status, 403);
+  const blockedLogin = await client.post('/api/auth/login', { identifier: '55550091', password: FIXTURE_PW });
+  assert.equal(blockedLogin.status, 403);
   assert.equal(
-    (blocked.body as { error: { details: { reason: string } } }).error.details.reason,
+    (blockedLogin.body as { error: { details: { code: string } } }).error.details.code,
     'EMAIL_NOT_VERIFIED',
   );
 
-  const resend = await client.post('/api/auth/email/resend', {});
+  const resend = await client.post('/api/auth/email/resend', { email: fixtureEmail('55550091') });
   assert.equal(resend.status, 200);
   const verifyToken = (resend.body as { devVerifyToken?: string }).devVerifyToken;
   assert.ok(verifyToken);
   assert.equal((await client.post('/api/auth/email/verify', { token: verifyToken })).status, 200);
-  const verifiedSession = await client.get('/api/auth/session');
-  assert.equal((verifiedSession.body as { user: { emailVerified: boolean } }).user.emailVerified, true);
   assert.equal((await client.post('/api/auth/email/verify', { token: verifyToken })).status, 200);
   assert.equal((await client.post('/api/auth/email/verify', { token: 'not-a-real-token' })).status, 422);
+
+  const login = await client.post('/api/auth/login', { identifier: '55550091', password: FIXTURE_PW });
+  assert.equal(login.status, 200);
+  await completeCustomerLoginOtp(client, (login.body as { devLoginOtp?: string }).devLoginOtp);
+  const verifiedSession = await client.get('/api/auth/session');
+  assert.equal((verifiedSession.body as { user: { emailVerified: boolean } }).user.emailVerified, true);
   assert.equal((await client.post('/api/auth/mfa/enroll', {})).status, 200);
 });
 
@@ -497,31 +538,49 @@ test('C14 customer login email OTP gates account until verified', async () => {
     termsAccepted: true,
   });
   assert.equal(reg.status, 201);
+  assert.equal('devLoginOtp' in (reg.body as object), false);
+  assert.equal((await sessionOf(client)).user ?? null, null);
+
+  const verifyMails = () =>
+    mailCaptures.filter((m) => m.subject === 'Verify your email' && m.to === fixtureEmail('55559901'));
+  const signInMails = () =>
+    mailCaptures.filter((m) => m.subject === 'Your sign-in code' && m.to === fixtureEmail('55559901'));
+  assert.equal(verifyMails().length, 1);
+  assert.equal(signInMails().length, 0);
+
   const devVerifyToken = (reg.body as { devVerifyToken?: string }).devVerifyToken;
   assert.ok(devVerifyToken);
   assert.equal((await client.post('/api/auth/email/verify', { token: devVerifyToken })).status, 200);
+  assert.equal((await sessionOf(client)).user ?? null, null);
+
+  const login = await client.post('/api/auth/login', { identifier: '55559901', password: FIXTURE_PW });
+  assert.equal(login.status, 200);
+  assert.equal((login.body as { mfaRequired: boolean; loginOtpSent?: boolean }).mfaRequired, true);
+  assert.ok((login.body as { loginOtpSent?: boolean }).loginOtpSent);
 
   const session = await client.get('/api/auth/session');
   assert.equal((session.body as { mfaRequired: boolean; mfaEnabled: boolean }).mfaRequired, true);
   assert.equal((session.body as { mfaEnabled: boolean }).mfaEnabled, false);
+  assert.equal((session.body as { user: unknown }).user ?? null, null);
 
   const denied = await client.get('/api/account');
   assert.equal(denied.status, 403);
   assert.equal((denied.body as { error: { details: { code: string } } }).error.details.code, 'MFA_REQUIRED');
 
-  const signInMails = () =>
-    mailCaptures.filter((m) => m.subject === 'Your sign-in code' && m.to === fixtureEmail('55559901'));
   assert.ok(signInMails().some((m) => /\d{6}/.test(m.text)));
 
   assert.equal((await client.post('/api/auth/login/otp', { code: '000000' })).status, 422);
 
-  let devLoginOtp = (reg.body as { devLoginOtp?: string }).devLoginOtp;
+  let devLoginOtp = (login.body as { devLoginOtp?: string }).devLoginOtp;
   if (!devLoginOtp) {
     const resend = await client.post('/api/auth/login/otp/resend', {});
     devLoginOtp = (resend.body as { devLoginOtp?: string }).devLoginOtp;
   }
   assert.ok(devLoginOtp);
   assert.equal((await client.post('/api/auth/login/otp', { code: devLoginOtp })).status, 200);
+  const postOtpSession = await sessionOf(client);
+  assert.notEqual(postOtpSession.user, null);
+  assert.equal(postOtpSession.mfaRequired, false);
   assert.equal((await client.get('/api/account')).status, 200);
 
   const phone = '55559901';
@@ -532,10 +591,12 @@ test('C14 customer login email OTP gates account until verified', async () => {
   const againSession = await again.get('/api/auth/session');
   assert.equal((againSession.body as { mfaRequired: boolean; mfaEnabled: boolean }).mfaRequired, true);
   assert.equal((againSession.body as { mfaEnabled: boolean }).mfaEnabled, false);
+  assert.equal((againSession.body as { user: unknown }).user ?? null, null);
+  assert.equal((await again.get('/api/account')).status, 403);
   const otp = (loginAgain.body as { devLoginOtp?: string }).devLoginOtp;
   assert.ok(otp);
   assert.equal((await again.post('/api/auth/login/otp', { code: otp })).status, 200);
-  assert.equal((await again.post('/api/auth/login/otp', { code: otp })).status, 422);
+  assert.equal((await again.post('/api/auth/login/otp', { code: otp })).status, 409);
   assert.equal((await again.get('/api/account')).status, 200);
 
   const enroll = await again.post('/api/auth/mfa/enroll', {});
@@ -543,9 +604,13 @@ test('C14 customer login email OTP gates account until verified', async () => {
   const secret = (enroll.body as { secret: string }).secret;
   assert.equal((await again.post('/api/auth/mfa/enroll/confirm', { code: generateTotp(secret) })).status, 200);
 
-  const totpLogin = await loginClient(phone, FIXTURE_PW);
+  const totpLogin = new TestClient(baseUrl);
+  await totpLogin.bootstrap();
+  const totpLoginRes = await totpLogin.post('/api/auth/login', { identifier: phone, password: FIXTURE_PW });
+  assert.equal(totpLoginRes.status, 200);
+  const userRef = (totpLoginRes.body as { user: { publicReference: string } }).user.publicReference;
   await handle.db.collection(COLLECTIONS.users).updateOne(
-    { publicReference: await refOf(totpLogin) },
+    { publicReference: userRef },
     { $set: { 'mfa.lastStep': null } },
   );
   assert.equal((await totpLogin.post('/api/auth/mfa/challenge', { code: generateTotp(secret) })).status, 200);

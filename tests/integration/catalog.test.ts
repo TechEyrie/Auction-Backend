@@ -354,6 +354,7 @@ test('D03 category icons are validated and exposed publicly', async () => {
   assert.equal(iconsRes.status, 200);
   const iconsBody = (await iconsRes.json()) as { icons: Array<{ key: string; label: string }> };
   assert.ok(iconsBody.icons.some((entry) => entry.key === 'watches'));
+  assert.ok(iconsBody.icons.some((entry) => entry.key === 'electronics'));
 
   const badIcon = await admin.post('/api/admin/categories', {
     key: 'bad-icon-cat',

@@ -74,7 +74,7 @@ export const openApiDocument: OpenApiDocument = {
     },
     '/api/auth/register': {
       post: {
-        summary: 'Register a customer account (customer role only)',
+        summary: 'Register a customer account (verification email only; no session)',
         responses: {
           '201': { description: 'Account created' },
           '422': errorResponse,
@@ -114,7 +114,7 @@ export const openApiDocument: OpenApiDocument = {
     },
     '/api/auth/email/resend': {
       post: {
-        summary: 'Resend the email verification message (authenticated)',
+        summary: 'Resend the email verification message (authenticated or public body.email)',
         responses: { '200': { description: 'Verification email sent' }, '409': errorResponse, '403': errorResponse },
       },
     },

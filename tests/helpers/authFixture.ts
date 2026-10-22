@@ -91,8 +91,12 @@ export async function createCustomerFixture(options: {
   if (register.status !== 201) throw new Error(`customer fixture failed: ${JSON.stringify(register.body)}`);
   const devVerifyToken = (register.body as { devVerifyToken?: string }).devVerifyToken;
   if (!devVerifyToken) throw new Error('customer fixture missing devVerifyToken');
-  const devLoginOtp = (register.body as { devLoginOtp?: string }).devLoginOtp;
   await verifyCustomerEmail(client, devVerifyToken);
-  await completeCustomerLoginOtp(client, devLoginOtp);
+  const login = await client.post('/api/auth/login', {
+    identifier: options.phone,
+    password: options.password,
+  });
+  if (login.status !== 200) throw new Error(`customer fixture login failed: ${JSON.stringify(login.body)}`);
+  await completeCustomerLoginOtp(client, (login.body as { devLoginOtp?: string }).devLoginOtp);
   return client;
 }
