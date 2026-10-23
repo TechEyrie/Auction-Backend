@@ -22,5 +22,7 @@ test('CI workflow exists and runs the core checks', () => {
   assert.ok(existsSync(workflow), 'backend CI workflow is missing');
   const yml = readFileSync(workflow, 'utf8');
   assert.match(yml, /npm run typecheck/);
-  assert.match(yml, /npm test/);
+  assert.match(yml, /npm run test:unit/);
+  assert.doesNotMatch(yml, /mongodb-binaries/);
+  assert.doesNotMatch(yml, /MONGOMS_/);
 });
