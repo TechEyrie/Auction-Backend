@@ -9,7 +9,7 @@ import { parseInput } from '../../shared/validate.ts';
 import { randomToken } from '../../shared/crypto.ts';
 import { safeInternalPath } from '../../shared/returnUrl.ts';
 import { clearSessionCookie, CSRF_COOKIE, readCookie, setCsrfCookie, setSessionCookie } from './cookies.ts';
-import { clientIp, requireActiveUser, requireAuth, requireEmailVerified } from './middleware.ts';
+import { clientIp, requireActiveUser, requireAuth, requireEmailVerified, requireMfa } from './middleware.ts';
 import { createAuthService } from './service.ts';
 
 export type AuthRouterDeps = { db: Db; config: AppConfig; logger: Logger };
@@ -213,6 +213,24 @@ export function authRouter(deps: AuthRouterDeps): Router {
       next(err);
     }
   });
+
+  router.post(
+    '/mfa/disable',
+    requireAuth(),
+    requireActiveUser(),
+    requireEmailVerified(),
+    requireMfa(),
+    async (req, res, next) => {
+      try {
+        const key = requireMfaKey();
+        const body = parseInput(z.object({ code: z.string().trim().min(1, 'required') }), req.body);
+        const result = await service.disableMfa(req.auth!.user, body.code, key);
+        res.json(result);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
 
   const loginOtpSchema = z.object({ code: z.string().regex(/^\d{6}$/) });
 

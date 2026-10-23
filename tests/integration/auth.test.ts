@@ -615,6 +615,32 @@ test('C14 customer login email OTP gates account until verified', async () => {
   );
   assert.equal((await totpLogin.post('/api/auth/mfa/challenge', { code: generateTotp(secret) })).status, 200);
   assert.equal((await totpLogin.get('/api/account')).status, 200);
+
+  assert.equal((await again.post('/api/auth/mfa/disable', { code: '' })).status, 422);
+  assert.equal((await again.post('/api/auth/mfa/disable', {})).status, 422);
+  assert.equal((await again.post('/api/auth/mfa/disable', { code: 'bad-code' })).status, 422);
+  assert.equal((await again.post('/api/auth/mfa/disable', { code: generateTotp(secret) })).status, 200);
+  const afterDisable = await again.get('/api/auth/session');
+  assert.equal((afterDisable.body as { mfaEnabled: boolean }).mfaEnabled, false);
+
+  mailCaptures.length = 0;
+  const emailOtpLogin = new TestClient(baseUrl);
+  await emailOtpLogin.bootstrap();
+  const emailLoginRes = await emailOtpLogin.post('/api/auth/login', { identifier: phone, password: FIXTURE_PW });
+  assert.equal(emailLoginRes.status, 200);
+  assert.equal((emailLoginRes.body as { mfaRequired: boolean }).mfaRequired, true);
+  assert.ok((emailLoginRes.body as { devLoginOtp?: string }).devLoginOtp);
+  const emailSession = await emailOtpLogin.get('/api/auth/session');
+  assert.equal((emailSession.body as { mfaRequired: boolean; mfaEnabled: boolean }).mfaRequired, true);
+  assert.equal((emailSession.body as { mfaEnabled: boolean }).mfaEnabled, false);
+  assert.equal((emailSession.body as { user: unknown }).user ?? null, null);
+  assert.equal((await emailOtpLogin.post('/api/auth/mfa/challenge', { code: '123456' })).status, 422);
+  assert.equal(
+    (await emailOtpLogin.post('/api/auth/login/otp', { code: (emailLoginRes.body as { devLoginOtp: string }).devLoginOtp }))
+      .status,
+    200,
+  );
+  assert.equal((await emailOtpLogin.get('/api/account')).status, 200);
 });
 
 test('C13 last-super-admin protection holds under concurrent changes', async () => {

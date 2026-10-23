@@ -124,6 +124,9 @@ export const openApiDocument: OpenApiDocument = {
     '/api/auth/mfa/enroll/confirm': {
       post: { summary: 'Confirm MFA enrollment with a TOTP code', responses: { '200': { description: 'MFA enabled' }, '422': errorResponse } },
     },
+    '/api/auth/mfa/disable': {
+      post: { summary: 'Turn off authenticator app MFA', responses: { '200': { description: 'MFA disabled' }, '422': errorResponse, '409': errorResponse } },
+    },
     '/api/auth/mfa/challenge': {
       post: { summary: 'Answer the MFA challenge', responses: { '200': { description: 'Privilege unlocked' }, '401': errorResponse } },
     },

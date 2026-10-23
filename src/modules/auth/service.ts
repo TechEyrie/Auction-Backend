@@ -13,7 +13,7 @@ import { recordAudit } from '../audit/repository.ts';
 import { toUserDto, type UserDto } from './dto.ts';
 import { capabilitiesFor, isStaff } from './roles.ts';
 import * as repo from './repository.ts';
-import type { AuthContext, SessionDoc, UserDoc, UserWithId } from './models.ts';
+import type { AuthContext, SessionDoc, UserDoc, UserMfa, UserWithId } from './models.ts';
 
 export type AuthDeps = { db: Db; config: AppConfig; logger: Logger };
 
@@ -438,31 +438,37 @@ export function createAuthService(deps: AuthDeps) {
     await repo.revokeAllUserSessions(db, challenge.userId, 'password_reset');
   }
 
+  function verifyEnabledMfaCode(mfaState: UserMfa, code: string, keyBase64: string): UserMfa {
+    let next = mfaState;
+    let verified = false;
+    if (mfaState.secretEnc) {
+      const existingSecret = decryptSecret(mfaState.secretEnc, keyBase64);
+      if (verifyTotp(existingSecret, String(code))) verified = true;
+    }
+    if (!verified) {
+      const hash = recoveryCodeHash(String(code));
+      const index = mfaState.recoveryCodes.findIndex((c) => c.usedAt === null && safeEqualHex(c.hash, hash));
+      if (index >= 0) {
+        next = {
+          ...mfaState,
+          recoveryCodes: mfaState.recoveryCodes.map((c, i) => (i === index ? { ...c, usedAt: new Date() } : c)),
+        };
+        verified = true;
+      }
+    }
+    if (!verified) {
+      throw new AppError('VALIDATION_ERROR', 'That code is not valid', { fieldErrors: { code: 'invalid' } });
+    }
+    return next;
+  }
+
   async function startMfaEnrollment(user: UserWithId, keyBase64: string, code?: string) {
     let mfaState = user.mfa;
     if (mfaState.enabled) {
       if (!code) {
         throw new AppError('CONFLICT', 'MFA is already enabled');
       }
-      let verified = false;
-      if (mfaState.secretEnc) {
-        const existingSecret = decryptSecret(mfaState.secretEnc, keyBase64);
-        if (verifyTotp(existingSecret, String(code))) verified = true;
-      }
-      if (!verified) {
-        const hash = recoveryCodeHash(String(code));
-        const index = mfaState.recoveryCodes.findIndex((c) => c.usedAt === null && safeEqualHex(c.hash, hash));
-        if (index >= 0) {
-          mfaState = {
-            ...mfaState,
-            recoveryCodes: mfaState.recoveryCodes.map((c, i) => (i === index ? { ...c, usedAt: new Date() } : c)),
-          };
-          verified = true;
-        }
-      }
-      if (!verified) {
-        throw new AppError('VALIDATION_ERROR', 'That code is not valid', { fieldErrors: { code: 'invalid' } });
-      }
+      mfaState = verifyEnabledMfaCode(mfaState, code, keyBase64);
     }
     const secret = generateTotpSecret();
     await repo.updateUserMfa(db, user._id, {
@@ -496,6 +502,21 @@ export function createAuthService(deps: AuthDeps) {
     });
     await repo.setSessionMfaSatisfied(db, session._id, currentStep());
     return { recoveryCodes };
+  }
+
+  async function disableMfa(user: UserWithId, code: string, keyBase64: string) {
+    if (!user.mfa.enabled) {
+      throw new AppError('CONFLICT', 'Authenticator is not enabled');
+    }
+    verifyEnabledMfaCode(user.mfa, code, keyBase64);
+    await repo.updateUserMfa(db, user._id, {
+      enabled: false,
+      secretEnc: null,
+      confirmedAt: null,
+      recoveryCodes: [],
+      lastStep: null,
+    });
+    return { ok: true as const };
   }
 
   async function completeLoginOtp(user: UserWithId, session: AuthContext['session'], code: string) {
@@ -614,6 +635,7 @@ export function createAuthService(deps: AuthDeps) {
     resetPassword,
     startMfaEnrollment,
     confirmMfaEnrollment,
+    disableMfa,
     completeLoginOtp,
     resendLoginOtp,
     mfaChallenge,
