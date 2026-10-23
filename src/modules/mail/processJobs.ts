@@ -61,11 +61,21 @@ async function resolveWinnerListingReference(
 async function sendMailWithLogging(
   logger: Logger | undefined,
   jobType: string,
-  input: { config: AppConfig; to: string; subject: string; text: string },
+  input: {
+    config: AppConfig;
+    db: Db;
+    to: string;
+    subject: string;
+    text: string;
+    userReference: string | null;
+  },
 ): Promise<void> {
   const { to, subject } = input;
   try {
-    await sendTransactionalMail(input);
+    await sendTransactionalMail({
+      ...input,
+      purpose: jobType,
+    });
     logger?.info('transactional mail sent', { type: jobType, to, subject });
   } catch (err) {
     logger?.error('transactional mail failed', {
@@ -141,18 +151,22 @@ async function processOneMailJob(
       const subject = `You won the auction for ${title}`;
       await sendMailWithLogging(logger, job.type, {
         config,
+        db,
         to,
         subject,
         text: `You won the auction for ${title}. ${product}`,
+        userReference: payload.userReference,
       });
       return 'sent';
     }
     const subject = `Reminder: complete payment for ${title}`;
     await sendMailWithLogging(logger, job.type, {
       config,
+      db,
       to,
       subject,
       text: `Reminder: you won the auction for ${title}. Please complete payment. ${product}`,
+      userReference: payload.userReference,
     });
     return 'sent';
   }
@@ -195,9 +209,11 @@ async function processOneMailJob(
     const subject = `The auction for ${title} is ending soon`;
     await sendMailWithLogging(logger, job.type, {
       config,
+      db,
       to,
       subject,
       text: `The auction for ${title} is ending soon. You are the current high bidder. ${product}`,
+      userReference: auction.highestUserReference,
     });
     return 'sent';
   }

@@ -124,12 +124,15 @@ export function createAuthService(deps: AuthDeps) {
     return token;
   }
 
-  async function sendEmailVerifyMail(to: string, rawToken: string): Promise<void> {
+  async function sendEmailVerifyMail(to: string, rawToken: string, userReference: string): Promise<void> {
     const origin = config.corsOrigins[0] ?? 'http://localhost:3000';
     const link = `${origin}/signin?verifyEmail=${encodeURIComponent(rawToken)}`;
     const text = `Verify your email for Araq & Kahraman.\n\nOpen this link:\n${link}\n\nOr paste this verification code on the sign-in page:\n${rawToken}\n\nThis link expires in 24 hours.`;
     await sendTransactionalMail({
       config,
+      db,
+      purpose: 'email_verify',
+      userReference,
       to,
       subject: 'Verify your email',
       text,
@@ -160,7 +163,15 @@ export function createAuthService(deps: AuthDeps) {
     });
     const text = `Your sign-in code for Araq & Kahraman is:\n\n${code}\n\nThis code expires in 10 minutes. If you did not try to sign in, you can ignore this email.`;
     try {
-      await sendTransactionalMail({ config, to: email, subject: 'Your sign-in code', text });
+      await sendTransactionalMail({
+        config,
+        db,
+        purpose: 'login_otp',
+        userReference: user.publicReference,
+        to: email,
+        subject: 'Your sign-in code',
+        text,
+      });
     } catch (err) {
       deps.logger.error('login OTP email send failed', {
         userId: user._id.toHexString(),
@@ -236,7 +247,7 @@ export function createAuthService(deps: AuthDeps) {
     });
     const verifyToken = await issueEmailVerifyChallenge(insertedId, emailNormalized, ctx.ip);
     try {
-      await sendEmailVerifyMail(emailNormalized, verifyToken);
+      await sendEmailVerifyMail(emailNormalized, verifyToken, doc.publicReference);
     } catch (err) {
       deps.logger.error('email verify send failed after register', {
         userId: insertedId.toHexString(),
@@ -328,6 +339,9 @@ export function createAuthService(deps: AuthDeps) {
       try {
         await sendTransactionalMail({
           config,
+          db,
+          purpose: 'password_reset',
+          userReference: user.publicReference,
           to: user.emailNormalized,
           subject: 'Reset your password',
           text,
@@ -383,7 +397,7 @@ export function createAuthService(deps: AuthDeps) {
     }
     const token = await issueEmailVerifyChallenge(user._id, emailNormalized, ip);
     try {
-      await sendEmailVerifyMail(emailNormalized, token);
+      await sendEmailVerifyMail(emailNormalized, token, user.publicReference);
     } catch (err) {
       deps.logger.error('email verify resend failed', {
         userId: user._id.toHexString(),
@@ -401,7 +415,7 @@ export function createAuthService(deps: AuthDeps) {
     if (!user || user.emailVerifiedAt) return null;
     const token = await issueEmailVerifyChallenge(user._id, emailNormalized, ip);
     try {
-      await sendEmailVerifyMail(emailNormalized, token);
+      await sendEmailVerifyMail(emailNormalized, token, user.publicReference);
     } catch (err) {
       deps.logger.error('email verify resend by email failed', {
         userId: user._id.toHexString(),

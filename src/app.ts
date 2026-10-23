@@ -25,6 +25,7 @@ import { adminAuctionRouter, auctionRouter } from './modules/auctions/routes.ts'
 import { auctionCalendarRouter } from './modules/auction-calendar/routes.ts';
 import { financeRouter } from './modules/finance/routes.ts';
 import { accountRouter, adminContentRouter, contentRouter, enquiryRouter } from './modules/account/routes.ts';
+import { adminEmailLogRouter } from './modules/mail/routes.ts';
 
 export type AppDeps = {
   config: AppConfig;
@@ -102,6 +103,7 @@ export function createApp(deps: AppDeps): Express {
   app.use('/api/content', contentRouter({ db: deps.db }));
   app.use('/api/enquiries', enquiryRouter({ db: deps.db }));
   app.use('/api/admin', adminContentRouter({ db: deps.db }));
+  app.use('/api/admin', adminEmailLogRouter({ db: deps.db }));
   app.use('/api/listings', publicListingRouter(listingDeps));
   app.use('/api/admin/listings', adminListingRouter(listingDeps));
   app.use('/api/admin', adminRouter({ db: deps.db, config: deps.config, logger: deps.logger, withTransaction: deps.withTransaction }));

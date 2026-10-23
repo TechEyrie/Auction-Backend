@@ -22,6 +22,7 @@ export const COLLECTIONS = {
   orders: 'orders',
   financialEntries: 'financial_entries',
   enquiries: 'enquiries',
+  emailLogs: 'email_logs',
   contentDocuments: 'content_documents',
 } as const;
 
@@ -196,6 +197,10 @@ export const INDEX_SPECS: Record<CollectionName, IndexDescription[]> = {
   ],
   [COLLECTIONS.enquiries]: [
     { key: { reference: 1 }, name: 'uniq_enquiry', unique: true },
+  ],
+  [COLLECTIONS.emailLogs]: [
+    { key: { createdAt: -1 }, name: 'rq_email_log_recent' },
+    { key: { to: 1, createdAt: -1 }, name: 'rq_email_log_to_recent' },
   ],
   [COLLECTIONS.contentDocuments]: [
     { key: { key: 1 }, name: 'uniq_content_key', unique: true },
