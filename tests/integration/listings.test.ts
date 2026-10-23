@@ -1390,6 +1390,18 @@ test('fixed-price buy reserves inventory, pays once, and refuses publish without
   });
   assert.equal(pay.status, 200);
   assert.equal(pay.body.order.paymentState, 'paid');
+
+  const finance = await admin.get<{
+    orders: Array<{
+      source: string;
+      buyer: { fullName: string | null };
+      fulfillment: { city: string } | null;
+    }>;
+  }>(`/api/admin/finance/orders?q=${encodeURIComponent(buy.body.order.orderReference)}`);
+  assert.equal(finance.status, 200);
+  assert.equal(finance.body.orders[0]?.source, 'fixed_price');
+  assert.equal(typeof finance.body.orders[0]?.buyer.fullName, 'string');
+  assert.equal(finance.body.orders[0]?.fulfillment?.city, 'Doha');
 });
 
 async function openLot(listingReference: string, startsAt: Date, endsAt: Date) {

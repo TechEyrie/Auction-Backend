@@ -56,3 +56,21 @@ test('chrome publish accepts known help labels and rejects unknown fields', () =
   });
   assert.equal(bad.success, false);
 });
+
+test('chrome publish accepts known categories labels and rejects unknown fields', () => {
+  const ok = chromePublishSchema.safeParse({
+    key: 'categories',
+    en: {
+      'categories.ctaTitle': "Can't find what you need?",
+      'method.auction': 'Auction',
+    },
+    ar: { 'categories.ctaTitle': 'هل لم تجد ما تحتاجه؟' },
+  });
+  assert.equal(ok.success, true);
+  const bad = chromePublishSchema.safeParse({
+    key: 'categories',
+    en: { 'categories.not.a.field': 'x' },
+    ar: {},
+  });
+  assert.equal(bad.success, false);
+});

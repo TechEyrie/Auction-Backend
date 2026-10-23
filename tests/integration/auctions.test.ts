@@ -469,11 +469,22 @@ test('I01-I12 finance summary is platform revenue; seller settlements disabled',
 
   const page = await admin.get<{
     total: number;
-    orders: Array<{ amountPaidMinor: number; sourceLabel: string; listingTitle: string }>;
+    orders: Array<{
+      amountPaidMinor: number;
+      source: string;
+      sourceLabel: string;
+      listingTitle: string;
+      lotReference: string | null;
+      buyer: { fullName: string | null; userReference: string };
+    }>;
   }>(`/api/admin/finance/orders?paymentState=paid&q=${orderReference}&page=1&limit=5`);
   assert.equal(page.status, 200);
   assert.equal(page.body.total, 1);
   assert.equal(page.body.orders[0]?.amountPaidMinor, 15000);
+  assert.equal(page.body.orders[0]?.source, 'auction');
+  assert.ok(page.body.orders[0]?.lotReference);
+  assert.equal(typeof page.body.orders[0]?.buyer.fullName, 'string');
+  assert.match(page.body.orders[0]?.buyer.fullName ?? '', /Auction Customer/i);
   assert.equal(JSON.stringify(page.body).includes('sellerNet'), false);
   assert.equal(JSON.stringify(page.body).includes('settlement'), false);
 
