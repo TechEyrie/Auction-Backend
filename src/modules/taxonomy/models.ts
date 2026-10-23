@@ -51,6 +51,7 @@ export const CATALOGUE_ROOTS = [
   'watches',
   'clothes-thobes',
   'cufflinks',
+  'electronics',
 ] as const;
 
 /** @deprecated Legacy calendar/listing guard; prefer {@link CATALOGUE_ROOTS} and {@link isCatalogueCategory}. */

@@ -109,7 +109,7 @@ test('seeded schemas stay valid and leaf categories allow auction', async () => 
 
 test('taxonomy list shows only the product catalogue parents', async () => {
   const taxonomy = createTaxonomyService({ db: handle.db, logger: silentLogger(), withTransaction: handle.withTransaction });
-  const forbidden = new Set(['jobs', 'property', 'vehicles', 'general', 'electronics', 'men', 'women']);
+  const forbidden = new Set(['jobs', 'property', 'vehicles', 'general', 'men', 'women']);
   for (const includeInactive of [false, true]) {
     const listed = await taxonomy.list(includeInactive);
     for (const category of listed) {
