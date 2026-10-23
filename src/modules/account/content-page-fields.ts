@@ -388,6 +388,7 @@ export const PRODUCT_LABEL_FIELDS = [
   'product.related',
   'product.continuePayment',
   'product.creatingOrder',
+  'product.whatsapp',
 ] as const;
 
 export const LOT_LABEL_FIELDS = [

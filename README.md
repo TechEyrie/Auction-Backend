@@ -29,8 +29,8 @@ required configuration is missing. Never commit `.env` and never place secrets i
 ## Integration tests
 
 `npm test` boots a real `mongod` as a single-node replica set via `mongodb-memory-server`
-(not a mock), so transactions and unique indexes are exercised for real. Set `MONGOMS_VERSION`
-to pin a cached binary.
+(not a mock), so transactions and unique indexes are exercised for real. CI sets
+`MONGOMS_VERSION=7.0.14`; override locally to pin another cached binary.
 
 ## Endpoints (foundation)
 
