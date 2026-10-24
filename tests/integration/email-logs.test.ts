@@ -77,20 +77,42 @@ test('login OTP send persists email log; admin can list; customer cannot', async
   assert.equal(login.status, 200);
   assert.ok(mailCaptures.some((m) => m.subject === 'Your sign-in code'));
 
+  const otpMail = mailCaptures.find((m) => m.subject === 'Your sign-in code');
+  assert.ok(otpMail);
+  const otpMatch = otpMail.text.match(/\b\d{6}\b/);
+  assert.ok(otpMatch);
+  const otpCode = otpMatch[0];
+
   const stored = await handle.db.collection(COLLECTIONS.emailLogs).find({ purpose: 'login_otp' }).toArray();
   assert.equal(stored.length, 1);
-  const row = stored[0]!;
+  const row = stored[0] as {
+    status: string;
+    to: string;
+    subject: string;
+    body?: string;
+  };
   assert.equal(row.status, 'sent');
   assert.equal(row.to, fixtureEmail('55552101'));
   assert.equal(row.subject, 'Your sign-in code');
+  assert.ok(typeof row.body === 'string');
+  assert.ok(!row.body!.includes(otpCode));
+  assert.match(row.body!, /sign-in code/i);
 
   const denied = await customer.get('/api/admin/email-logs');
   assert.ok(denied.status === 401 || denied.status === 403);
 
   const list = await adminClient.get('/api/admin/email-logs?limit=10');
   assert.equal(list.status, 200);
-  const rows = (list.body as { emailLogs: Array<{ purpose: string; status: string; to: string }> }).emailLogs;
-  assert.ok(rows.some((row) => row.purpose === 'login_otp' && row.status === 'sent' && row.to === fixtureEmail('55552101')));
+  const rows = (list.body as {
+    emailLogs: Array<{ purpose: string; status: string; to: string; body: string | null }>;
+  }).emailLogs;
+  const apiRow = rows.find(
+    (row) => row.purpose === 'login_otp' && row.status === 'sent' && row.to === fixtureEmail('55552101'),
+  );
+  assert.ok(apiRow);
+  assert.ok(apiRow.body);
+  assert.ok(!apiRow.body!.includes(otpCode));
+  assert.match(apiRow.body!, /sign-in code/i);
 
   await completeCustomerLoginOtp(customer, (login.body as { devLoginOtp?: string }).devLoginOtp);
 });

@@ -140,6 +140,12 @@ test('processMailJobs captures winner and lot-ending mail in test mode', async (
   assert.match(endingMail.subject, /ending soon/i);
   assert.match(endingMail.text, /high bidder/i);
   assertCustomerMailCopy(endingMail, { productLink: true });
+  const endingLog = await handle.db.collection(COLLECTIONS.emailLogs).findOne({
+    purpose: MAIL_JOB_TYPES.lotEnding,
+    to: CUSTOMER_EMAIL,
+  });
+  assert.equal(endingLog?.listingReference, LISTING_REFERENCE);
+  assert.equal(endingLog?.lotReference, lot);
 
   const closed = await admin.post<{ auction: { orderReference: string } }>(
     `/api/admin/auctions/${lot}/close`,
@@ -181,6 +187,13 @@ test('processMailJobs captures winner and lot-ending mail in test mode', async (
   assertCustomerMailCopy(actionMail, { productLink: true });
   assert.doesNotMatch(actionMail.text, /\/account/);
   assert.doesNotMatch(wonMail.text, /\/account/);
+
+  const wonLog = await handle.db.collection(COLLECTIONS.emailLogs).findOne({
+    purpose: MAIL_JOB_TYPES.winnerWon,
+    to: CUSTOMER_EMAIL,
+  });
+  assert.equal(wonLog?.listingReference, LISTING_REFERENCE);
+  assert.equal(wonLog?.lotReference, lot);
 
   const paid = await customer.post('/api/payments/complete', { orderReference });
   assert.equal(paid.status, 200);

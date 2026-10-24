@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Db } from 'mongodb';
 import { COLLECTIONS } from '../../db/indexes.ts';
-import { AppError } from '../../shared/errors.ts';
+import { AppError, validationError } from '../../shared/errors.ts';
 import { normalizeEmail, normalizePhoneE164 } from '../../shared/normalize.ts';
 import { requireCapability } from '../auth/middleware.ts';
 
@@ -34,6 +34,26 @@ function sourceLabel(source: unknown): string {
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const USER_PUBLIC_REF_RE = /^u_[A-Za-z0-9_-]+$/;
+
+function parseBuyerQuery(raw: unknown): string | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'string') throw validationError({ buyer: 'invalid buyer reference' });
+  const buyer = raw.trim();
+  if (!buyer || buyer.length > 80 || !USER_PUBLIC_REF_RE.test(buyer)) {
+    throw validationError({ buyer: 'invalid buyer reference' });
+  }
+  return buyer;
+}
+
+function parseSourceQuery(raw: unknown): 'auction' | 'fixed_price' | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  if (typeof raw !== 'string' || (raw !== 'auction' && raw !== 'fixed_price')) {
+    throw validationError({ source: 'invalid source' });
+  }
+  return raw;
 }
 
 function looksLikePersonQuery(q: string): boolean {
@@ -168,6 +188,10 @@ export function financeRouter(deps: { db: Db }): Router {
       const page = Math.max(1, Number(req.query.page ?? 1) || 1);
       const limit = Math.min(50, Math.max(1, Number(req.query.limit ?? 20) || 20));
       const filter: Record<string, unknown> = {};
+      const buyer = parseBuyerQuery(req.query.buyer);
+      if (buyer) filter.winnerUserReference = buyer;
+      const source = parseSourceQuery(req.query.source);
+      if (source) filter.source = source;
       if (typeof req.query.paymentState === 'string' && req.query.paymentState) {
         filter.paymentState = req.query.paymentState;
       }

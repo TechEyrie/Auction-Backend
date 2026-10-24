@@ -10,6 +10,9 @@ export type EmailLogDto = {
   error: string | null;
   createdAt: string;
   userReference: string | null;
+  listingReference: string | null;
+  lotReference: string | null;
+  body: string | null;
 };
 
 export function toEmailLogDto(doc: EmailLogDoc & { _id: ObjectId }): EmailLogDto {
@@ -22,5 +25,8 @@ export function toEmailLogDto(doc: EmailLogDoc & { _id: ObjectId }): EmailLogDto
     error: doc.error,
     createdAt: doc.createdAt.toISOString(),
     userReference: doc.userReference,
+    listingReference: doc.listingReference ?? null,
+    lotReference: doc.lotReference ?? null,
+    body: doc.body ?? null,
   };
 }

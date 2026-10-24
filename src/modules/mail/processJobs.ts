@@ -68,6 +68,8 @@ async function sendMailWithLogging(
     subject: string;
     text: string;
     userReference: string | null;
+    listingReference?: string | null;
+    lotReference?: string | null;
   },
 ): Promise<void> {
   const { to, subject } = input;
@@ -156,6 +158,8 @@ async function processOneMailJob(
         subject,
         text: `You won the auction for ${title}. ${product}`,
         userReference: payload.userReference,
+        listingReference,
+        lotReference: payload.lotReference,
       });
       return 'sent';
     }
@@ -167,6 +171,8 @@ async function processOneMailJob(
       subject,
       text: `Reminder: you won the auction for ${title}. Please complete payment. ${product}`,
       userReference: payload.userReference,
+      listingReference,
+      lotReference: payload.lotReference,
     });
     return 'sent';
   }
@@ -214,6 +220,8 @@ async function processOneMailJob(
       subject,
       text: `The auction for ${title} is ending soon. You are the current high bidder. ${product}`,
       userReference: auction.highestUserReference,
+      listingReference: auction.listingReference,
+      lotReference: auction.lotReference,
     });
     return 'sent';
   }

@@ -3,6 +3,7 @@ import type { Db } from 'mongodb';
 import type { AppConfig } from '../config/index.ts';
 import { AppError } from './errors.ts';
 import { insertEmailLog } from '../modules/mail/emailLogRepository.ts';
+import { redactMailBodyPreview } from '../modules/mail/redact.ts';
 
 export const mailCaptures: Array<{ to: string; subject: string; text: string }> = [];
 
@@ -22,6 +23,9 @@ async function persistEmailLog(
     status: 'sent' | 'failed';
     error: string | null;
     userReference?: string | null;
+    listingReference?: string | null;
+    lotReference?: string | null;
+    body: string;
   },
 ): Promise<void> {
   try {
@@ -32,6 +36,9 @@ async function persistEmailLog(
       status: input.status,
       error: input.error,
       userReference: input.userReference ?? null,
+      listingReference: input.listingReference ?? null,
+      lotReference: input.lotReference ?? null,
+      body: input.body,
     });
   } catch {
     // Logging must not fail a send the user already waited for.
@@ -46,9 +53,12 @@ export async function sendTransactionalMail(input: {
   db?: Db;
   purpose?: string;
   userReference?: string | null;
+  listingReference?: string | null;
+  lotReference?: string | null;
 }): Promise<void> {
-  const { config, to, subject, text, db, purpose, userReference } = input;
+  const { config, to, subject, text, db, purpose, userReference, listingReference, lotReference } = input;
   const shouldLog = Boolean(db && purpose);
+  const redactedBody = redactMailBodyPreview(text);
 
   const logFailure = async (err: unknown) => {
     if (!shouldLog || !db || !purpose) return;
@@ -59,6 +69,9 @@ export async function sendTransactionalMail(input: {
       status: 'failed',
       error: safeSendErrorMessage(err),
       userReference,
+      listingReference,
+      lotReference,
+      body: redactedBody,
     });
   };
 
@@ -72,6 +85,9 @@ export async function sendTransactionalMail(input: {
         status: 'sent',
         error: null,
         userReference,
+        listingReference,
+        lotReference,
+        body: redactedBody,
       });
     }
     return;
@@ -109,6 +125,9 @@ export async function sendTransactionalMail(input: {
         status: 'sent',
         error: null,
         userReference,
+        listingReference,
+        lotReference,
+        body: redactedBody,
       });
     }
   } catch (err) {

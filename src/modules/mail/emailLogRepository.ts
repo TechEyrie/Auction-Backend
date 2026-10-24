@@ -10,6 +10,10 @@ export type EmailLogDoc = {
   status: EmailLogStatus;
   error: string | null;
   userReference: string | null;
+  listingReference: string | null;
+  lotReference: string | null;
+  /** Redacted plain-text body; omitted on legacy rows. */
+  body?: string | null;
   createdAt: Date;
 };
 

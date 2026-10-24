@@ -488,6 +488,21 @@ test('I01-I12 finance summary is platform revenue; seller settlements disabled',
   assert.equal(JSON.stringify(page.body).includes('sellerNet'), false);
   assert.equal(JSON.stringify(page.body).includes('settlement'), false);
 
+  const winnerRef = page.body.orders[0]?.buyer.userReference;
+  assert.ok(winnerRef?.startsWith('u_'));
+  const byBuyerAuction = await admin.get<{ total: number; orders: Array<{ orderReference: string }> }>(
+    `/api/admin/finance/orders?buyer=${encodeURIComponent(winnerRef)}&source=auction`,
+  );
+  assert.equal(byBuyerAuction.status, 200);
+  assert.ok(byBuyerAuction.body.total >= 1);
+  assert.ok(byBuyerAuction.body.orders.some((row) => row.orderReference === orderReference));
+  const byBuyerFixed = await admin.get<{ total: number; orders: Array<{ orderReference: string }> }>(
+    `/api/admin/finance/orders?buyer=${encodeURIComponent(winnerRef)}&source=fixed_price`,
+  );
+  assert.equal(byBuyerFixed.status, 200);
+  assert.equal(byBuyerFixed.body.orders.some((row) => row.orderReference === orderReference), false);
+  assert.equal((await admin.get('/api/admin/finance/orders?buyer=not-a-user')).status, 422);
+
   const exported = await admin.get<string>('/api/admin/finance/export');
   assert.equal(exported.status, 200);
   assert.equal(String(exported.body).includes('sellerNet'), false);
